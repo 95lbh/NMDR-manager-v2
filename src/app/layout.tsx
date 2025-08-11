@@ -6,6 +6,7 @@ import "./globals.css";
 import PageNavigation from "@/components/PageNavigation";
 import { AlertProvider } from "@/components/CustomAlert";
 import FullscreenButton from "@/components/FullscreenButton";
+import PWAInstallPrompt from "@/components/PWAInstallPrompt";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -19,14 +20,50 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "N.M.D.R - 배드민턴 매니저",
-  description: "배드민턴 클럽 - N.M.D.R",
-  keywords: "배드민턴, 클럽관리, 출석관리, 게임관리",
+  description: "배드민턴 클럽 출석 관리 및 게임 매칭 시스템",
+  keywords: "배드민턴, 클럽관리, 출석관리, 게임관리, PWA",
   authors: [{ name: "N.M.D.R Team" }],
+  manifest: "/manifest.json",
+  icons: {
+    icon: [
+      { url: "/icons/icon-16x16.png", sizes: "16x16", type: "image/png" },
+      { url: "/icons/icon-32x32.png", sizes: "32x32", type: "image/png" },
+      { url: "/icons/icon-96x96.png", sizes: "96x96", type: "image/png" },
+      { url: "/icons/icon-192x192.png", sizes: "192x192", type: "image/png" },
+    ],
+    apple: [
+      { url: "/icons/icon-152x152.png", sizes: "152x152", type: "image/png" },
+      { url: "/icons/icon-167x167.png", sizes: "167x167", type: "image/png" },
+      { url: "/icons/icon-180x180.png", sizes: "180x180", type: "image/png" },
+    ],
+  },
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "default",
+    title: "N.M.D.R",
+  },
+  formatDetection: {
+    telephone: false,
+  },
+  openGraph: {
+    type: "website",
+    siteName: "N.M.D.R",
+    title: "N.M.D.R - 배드민턴 매니저",
+    description: "배드민턴 클럽 출석 관리 및 게임 매칭 시스템",
+  },
+  twitter: {
+    card: "summary",
+    title: "N.M.D.R - 배드민턴 매니저",
+    description: "배드민턴 클럽 출석 관리 및 게임 매칭 시스템",
+  },
 };
 
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
+  maximumScale: 1,
+  userScalable: false,
+  themeColor: "#10b981",
 };
 
 export default function RootLayout({
@@ -83,6 +120,9 @@ export default function RootLayout({
           <div className="min-h-screen pt-16">
             {children}
           </div>
+
+          {/* PWA 설치 프롬프트 */}
+          <PWAInstallPrompt />
         </AlertProvider>
       </body>
     </html>

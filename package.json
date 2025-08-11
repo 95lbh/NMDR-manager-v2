@@ -6,7 +6,11 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "generate-icons": "node scripts/generate-icons.js",
+    "build-production": "npm run generate-icons && npm run build",
+    "export": "next build && next export",
+    "analyze": "cross-env ANALYZE=true npm run build"
   },
   "dependencies": {
     "firebase": "^12.1.0",

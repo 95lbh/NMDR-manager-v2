@@ -284,3 +284,30 @@ body {
 .court-sparkle {
   animation: sparkle 2s ease-in-out infinite;
 }
+
+/* 팀 구성하기 버튼 효과 */
+@keyframes spin-slow {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes gentle-pulse {
+  0%, 100% {
+    transform: scale(0.975);
+  }
+  50% {
+    transform: scale(1.055);
+  }
+}
+
+.animate-spin-slow {
+  animation: spin-slow 15s linear infinite;
+}
+
+.animate-gentle-pulse {
+  animation: gentle-pulse 3s ease-in-out infinite;
+}

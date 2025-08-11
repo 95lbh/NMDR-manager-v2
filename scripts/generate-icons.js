@@ -10,7 +10,7 @@ const sizes = [
   16, 32, 72, 96, 128, 144, 152, 167, 180, 192, 384, 512
 ];
 
-const inputLogo = path.join(__dirname, '../public/icons/logo.png');
+const inputLogo = path.join(__dirname, '../public/icons/icon.png');
 const outputDir = path.join(__dirname, '../public/icons');
 
 // 출력 디렉토리가 없으면 생성

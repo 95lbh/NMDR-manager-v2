@@ -1,0 +1,8 @@
+User-agent: *
+Allow: /
+
+# Sitemap
+Sitemap: https://your-domain.com/sitemap.xml
+
+# 배드민턴 관리 시스템
+# N.M.D.R - 배드민턴 클럽 관리 시스템

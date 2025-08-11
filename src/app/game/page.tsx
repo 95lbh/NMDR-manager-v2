@@ -676,7 +676,7 @@ export default function GamePage() {
                   </span>
                 )}
               </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              <div className="space-y-2" style={{ height: `${Math.max(400, courts.length * 80)}px` }}>
                 {courts.map(court => (
                   <div
                     key={court.id}
@@ -685,7 +685,11 @@ export default function GamePage() {
                         assignTeamToCourt(court.id, selectedTeam);
                       }
                     }}
-                    className={`notion-card min-h-40 transition-all duration-200 ${
+                    className={`relative border-2 rounded-lg p-4 transition-all duration-200 ${
+                      court.status === 'playing'
+                        ? 'bg-green-50 border-green-400'
+                        : 'bg-white border-gray-200'
+                    } ${
                       selectedTeam && court.status === 'idle' && canTeamPlay(selectedTeam)
                         ? 'cursor-pointer hover:shadow-md border-green-300 court-sparkle'
                         : selectedTeam && court.status === 'idle' && !canTeamPlay(selectedTeam)
@@ -693,71 +697,90 @@ export default function GamePage() {
                           : ''
                     }`}
                     style={{
-                      backgroundColor: court.status === 'playing' ? 'var(--notion-green-light)' : undefined,
-                      borderColor: court.status === 'playing' ? 'var(--notion-green)' : undefined
+                      minHeight: court.status === 'playing' && court.team ?
+                        `${Math.max(90, 60 + (court.team.players.length * 8))}px` :
+                        '80px'
                     }}
                   >
-                    <div className="flex items-center justify-between mb-3">
-                      <span className="font-medium" style={{color: 'var(--notion-text)'}}>코트 {court.id}</span>
-                      <div className="flex items-center gap-2">
-                        <span className={`notion-badge ${
-                          court.status === 'playing' ? 'notion-badge-green' : 'notion-badge-gray'
+                    {/* 타이머 - 상단 중앙 */}
+                    {court.status === 'playing' && court.startedAt && (
+                      <div className="absolute top-1 left-1/2 transform -translate-x-1/2">
+                        <div className="flex items-center justify-center bg-green-100 text-green-900 font-bold px-8 py-1 rounded-lg shadow-lg">
+                          <div className="flex items-center gap-2">
+                            <div className="w-2 h-2 bg-green-900 rounded-full animate-bounce"></div>
+                            <span className="text-lg font-bold font-mono tracking-wider">
+                              {getGameDuration(court.startedAt)}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* 상태 배지 - 우측 상단 */}
+                    <div className="flex absolute top-2 right-2">
+                      <span className={`notion-badge text-xs ${
+                        court.status === 'playing' ? 'notion-badge-green' : 'notion-badge-gray'
+                      }`}>
+                        {court.status === 'playing' ? '게임 중' : '대기'}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center justify-between mt-6">
+                      {/* 왼쪽: 코트 번호 (크게) */}
+                      <div className="flex items-center">
+                        <div className={`px-3 py-3 rounded-lg font-bold text-2xl ${
+                          court.status === 'playing'
+                            ? 'bg-green-500 text-white shadow-lg'
+                            : 'bg-gray-100 text-gray-700 shadow-md'
                         }`}>
-                          {court.status === 'playing' ? '게임 중' : '대기'}
-                        </span>
+                          코트 {court.id}
+                        </div>
+                      </div>
+
+                      {/* 중앙: 플레이어 정보 */}
+                      {court.status === 'playing' && court.team ? (
+                        <div className="flex items-center gap-3 flex-1 justify-center">
+                          {court.team.players.map((player, index) => (
+                            <div key={player.id} className="flex items-center gap-1">
+                              <div className={`w-2 h-2 rounded-full ${
+                                player.gender === 'M' ? 'bg-blue-500' : 'bg-pink-500'
+                              }`}></div>
+                              <span className="font-bold text-2xl whitespace-nowrap" style={{color: 'var(--notion-text)'}}>{player.name}</span>
+                              <span className="notion-badge notion-badge-orange text-xs">{player.skill}</span>
+                              {index < (court.team?.players.length || 0) - 1 && (
+                                <span className="text-gray-400 mx-1">|</span>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="flex-1 text-center">
+                          <span className="text-gray-500 text-2xl font-bold">
+                            {selectedTeam && court.status === 'idle'
+                              ? canTeamPlay(selectedTeam)
+                                ? '클릭하여 게임 시작'
+                                : '매칭 불가 (게임중 플레이어 포함)'
+                              : '게임 대기 중'
+                            }
+                          </span>
+                        </div>
+                      )}
+
+                      {/* 오른쪽: 종료 버튼 */}
+                      <div className="flex items-center">
                         {court.status === 'playing' && (
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
                               finishGame(court.id);
                             }}
-                            className="text-xs px-2 py-1 bg-red-500 text-white rounded hover:bg-red-600"
+                            className="px-3 py-3 bg-red-500 text-white rounded-md hover:bg-red-600 font-medium text-m"
                           >
-                            종료
+                            게임 종료
                           </button>
                         )}
                       </div>
                     </div>
-
-                    {court.status === 'playing' && court.team ? (
-                      <div className="space-y-2">
-                        <div className="grid grid-cols-2 gap-2">
-                          {court.team.players.map(player => (
-                            <div key={player.id} className="flex items-center gap-1 text-sm">
-                              <div className={`w-2 h-2 rounded-full ${
-                                player.gender === 'M' ? 'bg-blue-500' : 'bg-pink-500'
-                              }`}></div>
-                              <span className="truncate" style={{color: 'var(--notion-text)'}}>{player.name}</span>
-                              <span className="notion-badge notion-badge-orange text-xs">{player.skill}</span>
-                            </div>
-                          ))}
-                        </div>
-                        {court.startedAt && (
-                          <div className="flex items-center justify-center mt-3">
-                            <div className="flex items-center bg-gradient-to-r from-green-500 to-emerald-600 text-white px-4 py-1 rounded-xl shadow-lg border-2 border-green-400 transform hover:scale-105 transition-all duration-200">
-                              <div className="flex items-center gap-2">
-                                <span className="text-2xl animate-pulse">⏱️</span>
-                                <span className="text-2xl font-bold font-mono tracking-wider">
-                                  {getGameDuration(court.startedAt)}
-                                </span>
-                              </div>
-                              {/* <div className="text-center text-xs font-medium opacity-90 mt-1">
-                                게임 진행 시간
-                              </div> */}
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    ) : (
-                      <div className="text-sm text-center py-8" style={{color: 'var(--notion-text-light)'}}>
-                        {selectedTeam && court.status === 'idle'
-                          ? canTeamPlay(selectedTeam)
-                            ? '클릭하여 게임 시작'
-                            : '매칭 불가 (게임중 플레이어 포함)'
-                          : '게임 대기 중'
-                        }
-                      </div>
-                    )}
                   </div>
                 ))}
               </div>
@@ -773,7 +796,7 @@ export default function GamePage() {
                 </h2>
                 <button
                   onClick={() => setShowPlayerModal(true)}
-                  className="notion-btn w-50 h-20 notion-btn-primary px-6 py-3 font-bold shadow-lg hover:shadow-xl transition-all duration-200 flex items-center justify-center"
+                  className="notion-btn w-50 h-20 notion-btn-primary px-6 py-3 font-bold shadow-lg hover:shadow-xl transition-all duration-300 flex items-center justify-center animate-gentle-pulse"
                   style={{ fontSize: '2rem' }}
                 >
                   팀 구성하기
