@@ -13,7 +13,7 @@ import {
   resetStatisticsData,
   resetMembersData,
 } from "@/lib/supabase-db";
-import type { AppSettings, CourtPosition } from "@/types/settings";
+import type { AppSettings } from "@/types/settings";
 import type { Member, Skill, Gender } from "@/types/db";
 import { useAlert } from "@/components/CustomAlert";
 import ConfirmModal from "@/components/ConfirmModal";
@@ -68,7 +68,7 @@ export default function SettingsPage() {
       setSaving(true);
       await saveAppSettings(settings);
       showAlert("설정이 저장되었습니다.", 'success');
-    } catch (e) {
+    } catch {
       showAlert("설정 저장에 실패했습니다.", 'error');
     } finally {
       setSaving(false);
@@ -86,7 +86,7 @@ export default function SettingsPage() {
         await deleteMember(member.id);
         await refreshData(); // 데이터 새로고침
         showAlert("회원이 삭제되었습니다.", 'success');
-      } catch (e) {
+      } catch {
         showAlert("회원 삭제에 실패했습니다.", 'error');
       }
       setShowConfirmModal(false);
@@ -99,7 +99,7 @@ export default function SettingsPage() {
       await updateMemberSkill(member.id, newSkill);
       await refreshData(); // 데이터 새로고침
       showAlert("실력 등급이 수정되었습니다.", 'success');
-    } catch (e) {
+    } catch {
       showAlert("실력 등급 수정에 실패했습니다.", 'error');
     }
   };
@@ -114,7 +114,7 @@ export default function SettingsPage() {
       });
       await refreshData(); // 데이터 새로고침
       showAlert("회원 정보가 수정되었습니다.", 'success');
-    } catch (e) {
+    } catch {
       showAlert("회원 정보 수정에 실패했습니다.", 'error');
     }
   };
@@ -460,9 +460,7 @@ function CourtSettings({
 // 회원 관리 컴포넌트
 function MemberManagement({
   members,
-  setMembers,
   onDeleteMember,
-  onUpdateSkill,
   onUpdateMember,
 }: {
   members: Member[];

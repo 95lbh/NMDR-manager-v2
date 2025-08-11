@@ -1,5 +1,5 @@
 import { supabase } from './supabase';
-import type { Member, Gender, Skill, AttendanceParticipant, Attendance, PlayerGameStats } from "@/types/db";
+import type { Member, Gender, Skill, AttendanceParticipant, Attendance, PlayerGameStats, GameState } from "@/types/db";
 import type { AppSettings } from "@/types/settings";
 
 // ===== 회원 관리 함수들 =====
@@ -131,7 +131,13 @@ export async function updateMember(memberId: string, updates: {
   skill?: Skill;
 }): Promise<Member> {
   // 업데이트할 데이터 준비
-  const updateData: any = {};
+  const updateData: {
+    name?: string;
+    name_lower?: string;
+    birth_year?: number;
+    gender?: Gender;
+    skill?: Skill;
+  } = {};
 
   if (updates.name !== undefined) {
     updateData.name = updates.name.trim();
@@ -547,7 +553,7 @@ export async function resetMembersData(): Promise<void> {
 
 // ===== 게임 상태 관리 함수들 =====
 
-export async function saveGameState(gameState: { teams: any[] }): Promise<void> {
+export async function saveGameState(gameState: GameState): Promise<void> {
   const today = new Date().toISOString().split('T')[0];
 
   const { error } = await supabase
@@ -563,7 +569,7 @@ export async function saveGameState(gameState: { teams: any[] }): Promise<void> 
   }
 }
 
-export async function loadGameState(): Promise<any | null> {
+export async function loadGameState(): Promise<GameState | null> {
   const today = new Date().toISOString().split('T')[0];
 
   const { data, error } = await supabase
@@ -580,7 +586,7 @@ export async function loadGameState(): Promise<any | null> {
 }
 
 // 실시간 게임 상태 구독
-export function subscribeToGameState(callback: (gameState: any) => void) {
+export function subscribeToGameState(callback: (gameState: GameState | null) => void) {
   const today = new Date().toISOString().split('T')[0];
 
   const subscription = supabase

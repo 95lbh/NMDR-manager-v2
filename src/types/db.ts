@@ -48,3 +48,23 @@ export interface Attendance {
   participants: AttendanceParticipant[];
 }
 
+// 게임 플레이어 인터페이스
+export interface GamePlayer {
+  id: string;
+  name: string;
+  skill: Skill;
+  gender: Gender;
+  isGuest: boolean;
+}
+
+// 게임 팀 인터페이스
+export interface GameTeam {
+  id: string;
+  players: GamePlayer[];
+}
+
+// 게임 상태 인터페이스
+export interface GameState {
+  teams: GameTeam[];
+}
+

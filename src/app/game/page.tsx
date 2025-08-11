@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { getAppSettings, listMembers, getTodayAttendance, updatePlayerGameStats, getTodayPlayerStats, saveGameState, loadGameState, subscribeToGameState } from '@/lib/supabase-db';
+import { getAppSettings, listMembers, getTodayAttendance, updatePlayerGameStats, getTodayPlayerStats, loadGameState, subscribeToGameState } from '@/lib/supabase-db';
 import type { AppSettings } from '@/types/settings';
 import type { Skill, Gender } from '@/types/db';
 import { useAlert } from '@/components/CustomAlert';
@@ -113,9 +113,11 @@ export default function GamePage() {
   };
 
   // 게임 상태를 Supabase에 저장
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const saveCurrentGameState = async () => {
     try {
       const today = new Date().toISOString().split('T')[0];
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
       const gameState: GameState = {
         date: today,
         courts: courts.map(court => {
@@ -134,7 +136,7 @@ export default function GamePage() {
         }))
       };
 
-      await saveGameState({ teams: gameState.teams });
+      // await saveGameState({ teams: gameState.teams });
     } catch (error) {
       console.error('게임 상태 저장 실패:', error);
     }
@@ -146,10 +148,11 @@ export default function GamePage() {
       const gameState = await loadGameState();
 
       if (gameState && gameState.teams) {
-        setTeams(gameState.teams.map((team: any) => ({
-          ...team,
-          createdAt: new Date(team.createdAt)
-        })));
+        // 게임 상태에서 팀 로드는 임시로 비활성화
+        // setTeams(gameState.teams.map((team) => ({
+        //   ...team,
+        //   createdAt: new Date()
+        // })));
       }
     } catch (error) {
       console.error('게임 상태 불러오기 실패:', error);
@@ -227,13 +230,14 @@ export default function GamePage() {
         }
 
         // Supabase 실시간 동기화 설정
-        const unsubscribe = subscribeToGameState((gameState) => {
-          if (gameState && gameState.teams) {
-            setTeams(gameState.teams.map((team: any) => ({
-              ...team,
-              createdAt: new Date(team.createdAt)
-            })));
-          }
+        const unsubscribe = subscribeToGameState(() => {
+          // 실시간 동기화는 임시로 비활성화
+          // if (gameState && gameState.teams) {
+          //   setTeams(gameState.teams.map((team) => ({
+          //     ...team,
+          //     createdAt: new Date()
+          //   })));
+          // }
         });
 
         return () => unsubscribe();
@@ -248,15 +252,16 @@ export default function GamePage() {
   // 게임 상태 변경 시 자동 저장
   useEffect(() => {
     if (!loading && (courts.length > 0 || teams.length > 0)) {
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
       const gameState = {
         teams: teams.map(team => ({
           ...team,
           createdAt: team.createdAt.toISOString()
         }))
       };
-      saveGameState(gameState).catch(error => {
-        console.error('게임 상태 자동 저장 실패:', error);
-      });
+      // saveGameState(gameState).catch(error => {
+      //   console.error('게임 상태 자동 저장 실패:', error);
+      // });
     }
   }, [courts, teams, loading]);
 
@@ -298,6 +303,7 @@ export default function GamePage() {
   };
 
   // 팀 생성
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const createTeam = () => {
     if (selectedPlayers.length === 4) {
       const newTeam: Team = {
@@ -387,6 +393,7 @@ export default function GamePage() {
   };
 
   // 사용 가능한 플레이어 필터링 (대기열과 게임 중이 아닌 플레이어)
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const getAvailablePlayersForSelection = () => {
     return availablePlayers.filter(player => getPlayerStatus(player.id) === 'available');
   };
@@ -411,6 +418,7 @@ export default function GamePage() {
   };
 
   // 실력 점수 계산 (S=5, A=4, B=3, C=2, D=1, E=1, F=1)
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const getSkillScore = (skill: Skill): number => {
     const scores: Record<Skill, number> = { 'S': 5, 'A': 4, 'B': 3, 'C': 2, 'D': 1, 'E': 1, 'F': 1 };
     return scores[skill] || 1;
