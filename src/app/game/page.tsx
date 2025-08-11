@@ -240,25 +240,25 @@ export default function GamePage() {
           setCourts(initialCourts);
         }
 
-        // 실시간 동기화 설정
-        const unsubscribe = onSnapshot(doc(db, 'gameStates', todayKey), (doc) => {
-          if (doc.exists()) {
-            const gameState = doc.data() as GameState;
-            setCourts(gameState.courts.map(court => ({
-              id: court.id,
-              status: court.status,
-              team: court.team,
-              startedAt: court.startedAt ? new Date(court.startedAt) : undefined,
-              duration: court.duration
-            })));
-            setTeams(gameState.teams.map(team => ({
-              ...team,
-              createdAt: new Date(team.createdAt)
-            })));
-          }
-        });
+        // 실시간 동기화 설정 (임시 비활성화 - 무한 루프 방지)
+        // const unsubscribe = onSnapshot(doc(db, 'gameStates', todayKey), (doc) => {
+        //   if (doc.exists()) {
+        //     const gameState = doc.data() as GameState;
+        //     setCourts(gameState.courts.map(court => ({
+        //       id: court.id,
+        //       status: court.status,
+        //       team: court.team,
+        //       startedAt: court.startedAt ? new Date(court.startedAt) : undefined,
+        //       duration: court.duration
+        //     })));
+        //     setTeams(gameState.teams.map(team => ({
+        //       ...team,
+        //       createdAt: new Date(team.createdAt)
+        //     })));
+        //   }
+        // });
 
-        return () => unsubscribe();
+        // return () => unsubscribe();
       } catch (e) {
         console.error('게임 페이지 초기화 실패:', e);
       } finally {
@@ -267,63 +267,63 @@ export default function GamePage() {
     })();
   }, []);
 
-  // 설정 변경 실시간 감지 및 코트 개수 동기화
-  useEffect(() => {
-    const unsubscribe = onSnapshot(doc(db, 'settings', 'app'), (doc) => {
-      if (doc.exists()) {
-        const newSettings = doc.data() as AppSettings;
-        const oldCourtsCount = settings?.courtsCount || 0;
-        const newCourtsCount = newSettings.courtsCount;
+  // 설정 변경 실시간 감지 및 코트 개수 동기화 (임시 비활성화 - 무한 루프 방지)
+  // useEffect(() => {
+  //   const unsubscribe = onSnapshot(doc(db, 'settings', 'app'), (doc) => {
+  //     if (doc.exists()) {
+  //       const newSettings = doc.data() as AppSettings;
+  //       const oldCourtsCount = settings?.courtsCount || 0;
+  //       const newCourtsCount = newSettings.courtsCount;
 
-        setSettings(newSettings);
+  //       setSettings(newSettings);
 
-        // 코트 개수가 변경된 경우 코트 상태 조정
-        if (oldCourtsCount !== newCourtsCount && oldCourtsCount > 0) {
-          setCourts(prevCourts => {
-            const currentCourts = [...prevCourts];
+  //       // 코트 개수가 변경된 경우 코트 상태 조정
+  //       if (oldCourtsCount !== newCourtsCount && oldCourtsCount > 0) {
+  //         setCourts(prevCourts => {
+  //           const currentCourts = [...prevCourts];
 
-            if (newCourtsCount > oldCourtsCount) {
-              // 코트 개수 증가: 새 코트 추가
-              for (let i = oldCourtsCount + 1; i <= newCourtsCount; i++) {
-                currentCourts.push({
-                  id: i,
-                  status: 'idle',
-                });
-              }
-              showAlert(`코트가 ${newCourtsCount}개로 증가했습니다.`, 'info');
-            } else if (newCourtsCount < oldCourtsCount) {
-              // 코트 개수 감소: 게임 중인 코트는 유지, 빈 코트만 제거
-              const filteredCourts = currentCourts.filter(court => {
-                if (court.id <= newCourtsCount) return true;
-                if (court.status === 'playing') {
-                  // 게임 중인 코트는 강제로 종료하고 팀을 대기열로 이동
-                  if (court.team) {
-                    setTeams(prev => [...prev, court.team!]);
-                    showAlert(`코트 ${court.id}의 게임이 종료되고 팀이 대기열로 이동했습니다.`, 'warning');
-                  }
-                  return false;
-                }
-                return false;
-              });
-              showAlert(`코트가 ${newCourtsCount}개로 감소했습니다.`, 'info');
-              return filteredCourts;
-            }
+  //           if (newCourtsCount > oldCourtsCount) {
+  //             // 코트 개수 증가: 새 코트 추가
+  //             for (let i = oldCourtsCount + 1; i <= newCourtsCount; i++) {
+  //               currentCourts.push({
+  //                 id: i,
+  //                 status: 'idle',
+  //               });
+  //             }
+  //             showAlert(`코트가 ${newCourtsCount}개로 증가했습니다.`, 'info');
+  //           } else if (newCourtsCount < oldCourtsCount) {
+  //             // 코트 개수 감소: 게임 중인 코트는 유지, 빈 코트만 제거
+  //             const filteredCourts = currentCourts.filter(court => {
+  //               if (court.id <= newCourtsCount) return true;
+  //               if (court.status === 'playing') {
+  //                 // 게임 중인 코트는 강제로 종료하고 팀을 대기열로 이동
+  //                 if (court.team) {
+  //                   setTeams(prev => [...prev, court.team!]);
+  //                   showAlert(`코트 ${court.id}의 게임이 종료되고 팀이 대기열로 이동했습니다.`, 'warning');
+  //                 }
+  //                 return false;
+  //               }
+  //               return false;
+  //             });
+  //             showAlert(`코트가 ${newCourtsCount}개로 감소했습니다.`, 'info');
+  //             return filteredCourts;
+  //           }
 
-            return currentCourts;
-          });
-        }
-      }
-    });
+  //           return currentCourts;
+  //         });
+  //       }
+  //     }
+  //   });
 
-    return () => unsubscribe();
-  }, [settings?.courtsCount, showAlert]);
+  //   return () => unsubscribe();
+  // }, [settings?.courtsCount, showAlert]);
 
-  // 게임 상태 변경 시 자동 저장
-  useEffect(() => {
-    if (!loading && (courts.length > 0 || teams.length > 0)) {
-      saveGameState();
-    }
-  }, [courts, teams, loading, saveGameState]);
+  // 게임 상태 변경 시 자동 저장 (임시 비활성화 - 무한 루프 방지)
+  // useEffect(() => {
+  //   if (!loading && (courts.length > 0 || teams.length > 0)) {
+  //     saveGameState();
+  //   }
+  // }, [courts, teams, loading, saveGameState]);
 
   // 실시간 타이머 업데이트
   useEffect(() => {
