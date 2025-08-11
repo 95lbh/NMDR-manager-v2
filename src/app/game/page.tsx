@@ -267,6 +267,57 @@ export default function GamePage() {
     })();
   }, []);
 
+  // 설정 변경 실시간 감지 및 코트 개수 동기화
+  useEffect(() => {
+    const unsubscribe = onSnapshot(doc(db, 'settings', 'app'), (doc) => {
+      if (doc.exists()) {
+        const newSettings = doc.data() as AppSettings;
+        const oldCourtsCount = settings?.courtsCount || 0;
+        const newCourtsCount = newSettings.courtsCount;
+
+        setSettings(newSettings);
+
+        // 코트 개수가 변경된 경우 코트 상태 조정
+        if (oldCourtsCount !== newCourtsCount && oldCourtsCount > 0) {
+          setCourts(prevCourts => {
+            const currentCourts = [...prevCourts];
+
+            if (newCourtsCount > oldCourtsCount) {
+              // 코트 개수 증가: 새 코트 추가
+              for (let i = oldCourtsCount + 1; i <= newCourtsCount; i++) {
+                currentCourts.push({
+                  id: i,
+                  status: 'idle',
+                });
+              }
+              showAlert(`코트가 ${newCourtsCount}개로 증가했습니다.`, 'info');
+            } else if (newCourtsCount < oldCourtsCount) {
+              // 코트 개수 감소: 게임 중인 코트는 유지, 빈 코트만 제거
+              const filteredCourts = currentCourts.filter(court => {
+                if (court.id <= newCourtsCount) return true;
+                if (court.status === 'playing') {
+                  // 게임 중인 코트는 강제로 종료하고 팀을 대기열로 이동
+                  if (court.team) {
+                    setTeams(prev => [...prev, court.team!]);
+                    showAlert(`코트 ${court.id}의 게임이 종료되고 팀이 대기열로 이동했습니다.`, 'warning');
+                  }
+                  return false;
+                }
+                return false;
+              });
+              showAlert(`코트가 ${newCourtsCount}개로 감소했습니다.`, 'info');
+              return filteredCourts;
+            }
+
+            return currentCourts;
+          });
+        }
+      }
+    });
+
+    return () => unsubscribe();
+  }, [settings?.courtsCount, showAlert]);
+
   // 게임 상태 변경 시 자동 저장
   useEffect(() => {
     if (!loading && (courts.length > 0 || teams.length > 0)) {
@@ -413,12 +464,13 @@ export default function GamePage() {
     return `${diffMinutes}:${diffSeconds.toString().padStart(2, '0')}`;
   };
 
-  // 플레이어 정렬 (남자-이름순, 여자-이름순)
+  // 플레이어 정렬 (남자-이름순, 여자-이름순) - 게임 중인 플레이어도 포함
   const getSortedPlayers = () => {
-    const availableForSelection = availablePlayers.filter(player => getPlayerStatus(player.id) === 'available');
+    // 대기 중인 플레이어만 제외하고 모든 플레이어 포함 (available + playing)
+    const selectablePlayers = availablePlayers.filter(player => getPlayerStatus(player.id) !== 'waiting');
 
-    const males = availableForSelection.filter(p => p.gender === 'M').sort((a, b) => a.name.localeCompare(b.name));
-    const females = availableForSelection.filter(p => p.gender === 'F').sort((a, b) => a.name.localeCompare(b.name));
+    const males = selectablePlayers.filter(p => p.gender === 'M').sort((a, b) => a.name.localeCompare(b.name));
+    const females = selectablePlayers.filter(p => p.gender === 'F').sort((a, b) => a.name.localeCompare(b.name));
 
     return [...males, ...females];
   };
@@ -444,13 +496,13 @@ export default function GamePage() {
     return shuffledPlayers.slice(0, count);
   };
 
-  // 자동 매칭 - 남복 (남자 4명)
+  // 자동 매칭 - 남복 (남자 4명) - 게임 중인 플레이어도 포함
   const autoMatchMale = () => {
-    const availableForSelection = availablePlayers.filter(player => getPlayerStatus(player.id) === 'available');
-    const males = availableForSelection.filter(p => p.gender === 'M');
+    const selectablePlayers = availablePlayers.filter(player => getPlayerStatus(player.id) !== 'waiting');
+    const males = selectablePlayers.filter(p => p.gender === 'M');
 
     if (males.length < 4) {
-      alert('사용 가능한 남자 플레이어가 4명 미만입니다.');
+      alert('선택 가능한 남자 플레이어가 4명 미만입니다.');
       return;
     }
 
@@ -458,13 +510,13 @@ export default function GamePage() {
     setSelectedPlayers(selectedTeam);
   };
 
-  // 자동 매칭 - 여복 (여자 4명)
+  // 자동 매칭 - 여복 (여자 4명) - 게임 중인 플레이어도 포함
   const autoMatchFemale = () => {
-    const availableForSelection = availablePlayers.filter(player => getPlayerStatus(player.id) === 'available');
-    const females = availableForSelection.filter(p => p.gender === 'F');
+    const selectablePlayers = availablePlayers.filter(player => getPlayerStatus(player.id) !== 'waiting');
+    const females = selectablePlayers.filter(p => p.gender === 'F');
 
     if (females.length < 4) {
-      alert('사용 가능한 여자 플레이어가 4명 미만입니다.');
+      alert('선택 가능한 여자 플레이어가 4명 미만입니다.');
       return;
     }
 
@@ -472,11 +524,11 @@ export default function GamePage() {
     setSelectedPlayers(selectedTeam);
   };
 
-  // 자동 매칭 - 혼복 (남자 2명 + 여자 2명)
+  // 자동 매칭 - 혼복 (남자 2명 + 여자 2명) - 게임 중인 플레이어도 포함
   const autoMatchMixed = () => {
-    const availableForSelection = availablePlayers.filter(player => getPlayerStatus(player.id) === 'available');
-    const males = availableForSelection.filter(p => p.gender === 'M');
-    const females = availableForSelection.filter(p => p.gender === 'F');
+    const selectablePlayers = availablePlayers.filter(player => getPlayerStatus(player.id) !== 'waiting');
+    const males = selectablePlayers.filter(p => p.gender === 'M');
+    const females = selectablePlayers.filter(p => p.gender === 'F');
 
     if (males.length < 2 || females.length < 2) {
       alert('혼복을 위해서는 남자 2명, 여자 2명이 필요합니다.');
@@ -917,7 +969,7 @@ export default function GamePage() {
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
                   {getSortedPlayers().map(player => {
                     const status = getPlayerStatus(player.id);
-                    const isSelectable = status === 'available' || status === 'playing'; // 게임중인 플레이어도 선택 가능
+                    const isSelectable = status !== 'waiting'; // 대기 중인 플레이어만 제외
                     const isSelected = selectedPlayers.find(p => p.id === player.id);
 
                     return (
@@ -925,11 +977,13 @@ export default function GamePage() {
                         key={player.id}
                         onClick={() => isSelectable && togglePlayerSelection(player)}
                         className={`p-3 rounded-xl border-2 transition-all duration-200 min-h-[90px] ${
-                          status === 'waiting'
+                          !isSelectable
                             ? 'opacity-50 cursor-not-allowed bg-gray-50 border-gray-200'
                             : isSelected
                               ? 'bg-blue-50 border-blue-600 cursor-pointer shadow-md transform scale-105'
-                              : 'bg-white border-gray-400 hover:border-gray-300 cursor-pointer hover:shadow-md'
+                              : status === 'playing'
+                                ? 'bg-green-50 border-green-300 cursor-pointer hover:border-green-400 hover:shadow-md'
+                                : 'bg-white border-gray-400 hover:border-gray-300 cursor-pointer hover:shadow-md'
                         }`}
                       >
                         {/* 1행: 중앙 상단 게임 상태 */}
