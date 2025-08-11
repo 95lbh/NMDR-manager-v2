@@ -7,6 +7,7 @@ import PageNavigation from "@/components/PageNavigation";
 import { AlertProvider } from "@/components/CustomAlert";
 import FullscreenButton from "@/components/FullscreenButton";
 import PWAInstallPrompt from "@/components/PWAInstallPrompt";
+import FirebaseDebug from "@/components/FirebaseDebug";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -123,6 +124,9 @@ export default function RootLayout({
 
           {/* PWA 설치 프롬프트 */}
           <PWAInstallPrompt />
+
+          {/* Firebase 디버그 (개발 환경에서만) */}
+          <FirebaseDebug />
         </AlertProvider>
       </body>
     </html>
