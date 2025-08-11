@@ -1,5 +1,6 @@
 import { initializeApp, getApps, getApp, FirebaseApp } from "firebase/app";
 import { getAnalytics, isSupported, Analytics } from "firebase/analytics";
+import { getFirestore, Firestore } from "firebase/firestore";
 
 const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
@@ -13,6 +14,7 @@ const firebaseConfig = {
 
 let app: FirebaseApp;
 let analytics: Analytics | undefined;
+let firestore: Firestore;
 
 export function getFirebaseApp() {
   if (!getApps().length) {
@@ -31,4 +33,14 @@ export async function getFirebaseAnalytics() {
   }
   return analytics;
 }
+
+export function getFirebaseFirestore() {
+  const app = getFirebaseApp();
+  if (!firestore) {
+    firestore = getFirestore(app);
+  }
+  return firestore;
+}
+
+export const db = getFirebaseFirestore();
 
