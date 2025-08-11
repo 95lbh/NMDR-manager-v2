@@ -1,8 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { createMember, listMembers, markAttendance, removeAttendance } from '@/lib/firestore';
-import { getTodayAttendance } from '@/lib/firestore';
+import { createMember, listMembers, markAttendance, getTodayAttendance, removeAttendance } from '@/lib/supabase-db';
 import type { Gender, Skill, Member, AttendanceParticipant } from '@/types/db';
 import { useAlert } from '@/components/CustomAlert';
 import ConfirmModal from '@/components/ConfirmModal';

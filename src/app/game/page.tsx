@@ -1,9 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { getAppSettings, listMembers, getTodayAttendance, updatePlayerGameStats, getTodayPlayerStats } from '@/lib/firestore';
-import { doc, setDoc, getDoc, onSnapshot } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { getAppSettings, listMembers, getTodayAttendance, updatePlayerGameStats, getTodayPlayerStats, saveGameState, loadGameState, subscribeToGameState } from '@/lib/supabase-db';
 import type { AppSettings } from '@/types/settings';
 import type { Skill, Gender } from '@/types/db';
 import { useAlert } from '@/components/CustomAlert';
@@ -114,8 +112,8 @@ export default function GamePage() {
     }
   };
 
-  // 게임 상태를 Firestore에 저장
-  const saveGameState = async () => {
+  // 게임 상태를 Supabase에 저장
+  const saveCurrentGameState = async () => {
     try {
       const today = new Date().toISOString().split('T')[0];
       const gameState: GameState = {
@@ -136,29 +134,19 @@ export default function GamePage() {
         }))
       };
 
-      await setDoc(doc(db, 'gameStates', today), gameState);
+      await saveGameState({ teams: gameState.teams });
     } catch (error) {
       console.error('게임 상태 저장 실패:', error);
     }
   };
 
-  // 게임 상태를 Firestore에서 불러오기
-  const loadGameState = async () => {
+  // 게임 상태를 Supabase에서 불러오기
+  const loadGameStateFromDB = async () => {
     try {
-      const today = new Date().toISOString().split('T')[0];
-      const docRef = doc(db, 'gameStates', today);
-      const docSnap = await getDoc(docRef);
+      const gameState = await loadGameState();
 
-      if (docSnap.exists()) {
-        const gameState = docSnap.data() as GameState;
-        setCourts(gameState.courts.map(court => ({
-          id: court.id,
-          status: court.status,
-          team: court.team,
-          startedAt: court.startedAt ? new Date(court.startedAt) : undefined,
-          duration: court.duration
-        })));
-        setTeams(gameState.teams.map(team => ({
+      if (gameState && gameState.teams) {
+        setTeams(gameState.teams.map((team: any) => ({
           ...team,
           createdAt: new Date(team.createdAt)
         })));
@@ -224,14 +212,12 @@ export default function GamePage() {
         setAvailablePlayers(players.sort((a, b) => a.name.localeCompare(b.name)));
 
         // 저장된 게임 상태 불러오기
-        await loadGameState();
+        await loadGameStateFromDB();
 
         // 게임 상태 불러오기 후 코트 수 확인 및 초기화
-        const todayKey = new Date().toISOString().split('T')[0];
-        const docRef = doc(db, 'gameStates', todayKey);
-        const docSnap = await getDoc(docRef);
+        const gameState = await loadGameState();
 
-        if (!docSnap.exists()) {
+        if (!gameState) {
           // 저장된 게임 상태가 없으면 초기 코트 상태 생성
           const initialCourts: Court[] = Array.from({ length: appSettings.courtsCount }, (_, i) => ({
             id: i + 1,
@@ -240,25 +226,17 @@ export default function GamePage() {
           setCourts(initialCourts);
         }
 
-        // 실시간 동기화 설정 (임시 비활성화 - 무한 루프 방지)
-        // const unsubscribe = onSnapshot(doc(db, 'gameStates', todayKey), (doc) => {
-        //   if (doc.exists()) {
-        //     const gameState = doc.data() as GameState;
-        //     setCourts(gameState.courts.map(court => ({
-        //       id: court.id,
-        //       status: court.status,
-        //       team: court.team,
-        //       startedAt: court.startedAt ? new Date(court.startedAt) : undefined,
-        //       duration: court.duration
-        //     })));
-        //     setTeams(gameState.teams.map(team => ({
-        //       ...team,
-        //       createdAt: new Date(team.createdAt)
-        //     })));
-        //   }
-        // });
+        // Supabase 실시간 동기화 설정
+        const unsubscribe = subscribeToGameState((gameState) => {
+          if (gameState && gameState.teams) {
+            setTeams(gameState.teams.map((team: any) => ({
+              ...team,
+              createdAt: new Date(team.createdAt)
+            })));
+          }
+        });
 
-        // return () => unsubscribe();
+        return () => unsubscribe();
       } catch (e) {
         console.error('게임 페이지 초기화 실패:', e);
       } finally {
@@ -267,63 +245,20 @@ export default function GamePage() {
     })();
   }, []);
 
-  // 설정 변경 실시간 감지 및 코트 개수 동기화 (임시 비활성화 - 무한 루프 방지)
-  // useEffect(() => {
-  //   const unsubscribe = onSnapshot(doc(db, 'settings', 'app'), (doc) => {
-  //     if (doc.exists()) {
-  //       const newSettings = doc.data() as AppSettings;
-  //       const oldCourtsCount = settings?.courtsCount || 0;
-  //       const newCourtsCount = newSettings.courtsCount;
-
-  //       setSettings(newSettings);
-
-  //       // 코트 개수가 변경된 경우 코트 상태 조정
-  //       if (oldCourtsCount !== newCourtsCount && oldCourtsCount > 0) {
-  //         setCourts(prevCourts => {
-  //           const currentCourts = [...prevCourts];
-
-  //           if (newCourtsCount > oldCourtsCount) {
-  //             // 코트 개수 증가: 새 코트 추가
-  //             for (let i = oldCourtsCount + 1; i <= newCourtsCount; i++) {
-  //               currentCourts.push({
-  //                 id: i,
-  //                 status: 'idle',
-  //               });
-  //             }
-  //             showAlert(`코트가 ${newCourtsCount}개로 증가했습니다.`, 'info');
-  //           } else if (newCourtsCount < oldCourtsCount) {
-  //             // 코트 개수 감소: 게임 중인 코트는 유지, 빈 코트만 제거
-  //             const filteredCourts = currentCourts.filter(court => {
-  //               if (court.id <= newCourtsCount) return true;
-  //               if (court.status === 'playing') {
-  //                 // 게임 중인 코트는 강제로 종료하고 팀을 대기열로 이동
-  //                 if (court.team) {
-  //                   setTeams(prev => [...prev, court.team!]);
-  //                   showAlert(`코트 ${court.id}의 게임이 종료되고 팀이 대기열로 이동했습니다.`, 'warning');
-  //                 }
-  //                 return false;
-  //               }
-  //               return false;
-  //             });
-  //             showAlert(`코트가 ${newCourtsCount}개로 감소했습니다.`, 'info');
-  //             return filteredCourts;
-  //           }
-
-  //           return currentCourts;
-  //         });
-  //       }
-  //     }
-  //   });
-
-  //   return () => unsubscribe();
-  // }, [settings?.courtsCount, showAlert]);
-
-  // 게임 상태 변경 시 자동 저장 (임시 비활성화 - 무한 루프 방지)
-  // useEffect(() => {
-  //   if (!loading && (courts.length > 0 || teams.length > 0)) {
-  //     saveGameState();
-  //   }
-  // }, [courts, teams, loading, saveGameState]);
+  // 게임 상태 변경 시 자동 저장
+  useEffect(() => {
+    if (!loading && (courts.length > 0 || teams.length > 0)) {
+      const gameState = {
+        teams: teams.map(team => ({
+          ...team,
+          createdAt: team.createdAt.toISOString()
+        }))
+      };
+      saveGameState(gameState).catch(error => {
+        console.error('게임 상태 자동 저장 실패:', error);
+      });
+    }
+  }, [courts, teams, loading]);
 
   // 실시간 타이머 업데이트
   useEffect(() => {
@@ -597,22 +532,22 @@ export default function GamePage() {
                   {/* 제목 */}
                   <div className="flex items-center gap-2">
                     <span className="text-xl">🏸</span>
-                    <h3 className="text-lg font-bold bg-gradient-to-r from-yellow-600 to-amber-600 bg-clip-text text-transparent">
+                    <h3 className="text-3xl font-bold bg-gradient-to-r from-yellow-600 to-amber-600 bg-clip-text text-transparent">
                       다음 대기팀
                     </h3>
                   </div>
 
                   {/* 플레이어 목록 - 중앙 배치 */}
-                  <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-4">
                     {firstTeam.players.map((player) => (
                       <div
                         key={player.id}
-                        className="flex items-center gap-2 px-3 py-2 bg-white/80 backdrop-blur-sm rounded-lg shadow-md border border-gray-200/50"
+                        className="flex items-center gap-2 px-7 py-4 bg-white/80 backdrop-blur-sm rounded-lg shadow-md border border-gray-600/50"
                       >
                         <div className={`w-3 h-3 rounded-full shadow-sm ${
                           player.gender === 'M' ? 'bg-gradient-to-r from-blue-500 to-blue-600' : 'bg-gradient-to-r from-pink-500 to-pink-600'
                         }`}></div>
-                        <span className="text-sm font-bold text-gray-800">
+                        <span className="text-xl font-bold text-gray-800">
                           {player.isGuest ? '(G) ' : ''}{player.name}
                         </span>
                       </div>
@@ -621,7 +556,7 @@ export default function GamePage() {
 
                   {/* 우측 버튼들 */}
                   <div className="flex items-center gap-2">
-                    <span className="px-2 py-1 bg-gradient-to-r from-blue-500 to-blue-600 text-white text-xs font-medium rounded-full shadow-md">
+                    <span className="px-4 py-3 bg-gradient-to-r from-red-500 to-red-600 text-white text-l font-medium rounded-full shadow-md">
                       클릭 후 코트 선택
                     </span>
                     {selectedTeam?.id === firstTeam.id && (
@@ -656,7 +591,7 @@ export default function GamePage() {
                   onClick={async () => {
                     try {
                       // DB에서 최신 데이터 동기화 (페이지 새로고침 없이)
-                      await loadGameState();
+                      await loadGameStateFromDB();
 
                       // 출석 데이터와 회원 정보도 다시 로드
                       const [appSettings, members, attendance] = await Promise.all([
@@ -862,7 +797,7 @@ export default function GamePage() {
                       <div
                         key={team.id}
                         onClick={() => setSelectedTeam(selectedTeam?.id === team.id ? null : team)}
-                        className={`p-3 rounded-lg border cursor-pointer transition-all duration-200 ${
+                        className={`p-2 rounded-lg border cursor-pointer transition-all duration-200 ${
                           !teamCanPlay
                             ? 'bg-red-50 border-red-200 opacity-75'
                             : selectedTeam?.id === team.id
@@ -873,7 +808,7 @@ export default function GamePage() {
                         <div className="flex items-center justify-between mb-2">
                           <div className="flex items-center gap-2">
                             <span className="font-medium text-sm" style={{color: 'var(--notion-text)'}}>
-                              대기열{index + 1}
+                              대기열 {index + 1}
                             </span>
                             {!teamCanPlay && (
                               <span className="notion-badge notion-badge-red text-xs">매칭불가</span>
@@ -893,11 +828,11 @@ export default function GamePage() {
                           {team.players.map(player => {
                             const playerStatus = getPlayerStatus(player.id);
                             return (
-                              <div key={player.id} className="flex items-center gap-2 text-xs">
+                              <div key={player.id} className="flex items-center gap-3 text-xs">
                                 <div className={`w-2 h-2 rounded-full ${
                                   player.gender === 'M' ? 'bg-blue-500' : 'bg-pink-500'
                                 }`}></div>
-                                <span className="flex-1 truncate">{player.name}</span>
+                                <span className="flex-1 truncate font-bold">{player.name}</span>
                                 <span className="notion-badge notion-badge-orange text-xs">{player.skill}</span>
                                 {playerStatus === 'playing' && (
                                   <span className="notion-badge notion-badge-green text-xs">게임중</span>

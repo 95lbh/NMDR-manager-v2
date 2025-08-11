@@ -26,9 +26,16 @@ export default function Home() {
             href="/attendance"
             className="notion-card group h-58 flex flex-col items-center justify-center text-center cursor-pointer hover:scale-[1.02] transition-all duration-200"
           >
-            <div className="w-16 h-16 rounded-full flex items-center justify-center mb-4 notion-badge-blue">
-              <svg className="w-8 h-8" fill="currentColor" viewBox="0 0 20 20">
-                <path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+            <div className="w-16 h-16 rounded-full flex items-center justify-center mb-4 notion-badge-blue relative overflow-hidden">
+              {/* 배경 그라데이션 효과 */}
+              <div className="absolute inset-0 bg-gradient-to-br from-blue-400 to-blue-600 opacity-20 group-hover:opacity-30 transition-opacity"></div>
+
+              {/* 출석부 아이콘 */}
+              <svg className="w-8 h-8 relative z-10" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z"/>
+                <circle cx="5.5" cy="8.5" r="1.5" fill="currentColor"/>
+                <circle cx="5.5" cy="12.5" r="1.5" fill="currentColor"/>
+                <circle cx="5.5" cy="16.5" r="1.5" fill="currentColor"/>
               </svg>
             </div>
             <h2 className="text-3xl font-semibold mb-2" style={{color: 'var(--notion-text)'}}>출석</h2>
@@ -39,9 +46,29 @@ export default function Home() {
             href="/game"
             className="notion-card group h-58 flex flex-col items-center justify-center text-center cursor-pointer hover:scale-[1.02] transition-all duration-200"
           >
-            <div className="w-16 h-16 rounded-full flex items-center justify-center mb-4 notion-badge-green">
-              <svg className="w-8 h-8" fill="currentColor" viewBox="0 0 20 20">
-                <path d="M13 6a3 3 0 11-6 0 3 3 0 016 0zM18 8a2 2 0 11-4 0 2 2 0 014 0zM14 15a4 4 0 00-8 0v3h8v-3z" />
+            <div className="w-16 h-16 rounded-full flex items-center justify-center mb-4 notion-badge-green relative overflow-hidden">
+              {/* 배경 그라데이션 효과 */}
+              <div className="absolute inset-0 bg-gradient-to-br from-green-400 to-green-600 opacity-20 group-hover:opacity-30 transition-opacity"></div>
+
+              {/* 배드민턴 라켓 아이콘 */}
+              <svg className="w-8 h-8 relative z-10" fill="currentColor" viewBox="0 0 24 24">
+                {/* 라켓 헤드 */}
+                <ellipse cx="12" cy="8" rx="5" ry="6" fill="none" stroke="currentColor" strokeWidth="2"/>
+                {/* 라켓 손잡이 */}
+                <rect x="11" y="14" width="2" height="8" fill="currentColor"/>
+                {/* 라켓 그립 끝 */}
+                <rect x="10.5" y="21" width="3" height="1.5" rx="0.75" fill="currentColor"/>
+                {/* 라켓 스트링 (가로) */}
+                <line x1="8" y1="6" x2="16" y2="6" stroke="currentColor" strokeWidth="0.5"/>
+                <line x1="8" y1="8" x2="16" y2="8" stroke="currentColor" strokeWidth="0.5"/>
+                <line x1="8" y1="10" x2="16" y2="10" stroke="currentColor" strokeWidth="0.5"/>
+                {/* 라켓 스트링 (세로) */}
+                <line x1="10" y1="3" x2="10" y2="13" stroke="currentColor" strokeWidth="0.5"/>
+                <line x1="12" y1="2.5" x2="12" y2="13.5" stroke="currentColor" strokeWidth="0.5"/>
+                <line x1="14" y1="3" x2="14" y2="13" stroke="currentColor" strokeWidth="0.5"/>
+                {/* 셔틀콕 */}
+                <circle cx="18" cy="5" r="1.5" fill="currentColor" opacity="0.7"/>
+                <path d="M18 3.5 L19 2 L17 2 Z" fill="currentColor" opacity="0.7"/>
               </svg>
             </div>
             <h2 className="text-3xl font-semibold mb-2" style={{color: 'var(--notion-text)'}}>게임</h2>

@@ -7,11 +7,12 @@ import {
   listMembers,
   deleteMember,
   updateMemberSkill,
+  updateMember,
   getTotalGamesCount,
   getTotalShuttlesCount,
   resetStatisticsData,
   resetMembersData,
-} from "@/lib/firestore";
+} from "@/lib/supabase-db";
 import type { AppSettings, CourtPosition } from "@/types/settings";
 import type { Member, Skill, Gender } from "@/types/db";
 import { useAlert } from "@/components/CustomAlert";
@@ -103,6 +104,21 @@ export default function SettingsPage() {
     }
   };
 
+  const handleUpdateMember = async (updatedMember: Member) => {
+    try {
+      await updateMember(updatedMember.id, {
+        name: updatedMember.name,
+        birthYear: updatedMember.birthYear,
+        gender: updatedMember.gender,
+        skill: updatedMember.skill
+      });
+      await refreshData(); // 데이터 새로고침
+      showAlert("회원 정보가 수정되었습니다.", 'success');
+    } catch (e) {
+      showAlert("회원 정보 수정에 실패했습니다.", 'error');
+    }
+  };
+
   if (loading) {
     return (
       <div
@@ -186,6 +202,7 @@ export default function SettingsPage() {
               setMembers={setMembers}
               onDeleteMember={handleDeleteMember}
               onUpdateSkill={handleUpdateSkill}
+              onUpdateMember={handleUpdateMember}
             />
           )}
           {activeTab === "data" && <DataManagement members={members} loading={loading} totalGamesCount={totalGamesCount} totalShuttlesCount={totalShuttlesCount} onRefresh={refreshData} />}
@@ -446,11 +463,13 @@ function MemberManagement({
   setMembers,
   onDeleteMember,
   onUpdateSkill,
+  onUpdateMember,
 }: {
   members: Member[];
   setMembers: (members: Member[]) => void;
   onDeleteMember: (member: Member) => void;
   onUpdateSkill: (member: Member, skill: Skill) => void;
+  onUpdateMember: (member: Member) => void;
 }) {
   const [editingMember, setEditingMember] = useState<Member | null>(null);
   return (
@@ -569,8 +588,7 @@ function MemberManagement({
           member={editingMember}
           onClose={() => setEditingMember(null)}
           onSave={(updatedMember) => {
-            // TODO: 회원 정보 업데이트 로직
-            console.log('Updated member:', updatedMember);
+            onUpdateMember(updatedMember);
             setEditingMember(null);
           }}
         />
@@ -783,7 +801,7 @@ function DataManagement({
           <div className="bg-gradient-to-br from-blue-50 to-blue-100 p-5 rounded-xl border border-blue-200 shadow-sm hover:shadow-md transition-all duration-200">
             <div className="flex items-center justify-between">
               <div>
-                <div className="text-blue-600 text-sm font-medium mb-1">총 회원 수</div>
+                <div className="text-blue-600 text-sm font-medium mb-1">우리 총 몇 명임?</div>
                 <div className="text-2xl font-bold text-blue-700">{members.length}</div>
                 <div className="text-blue-500 text-xs">명</div>
               </div>
@@ -796,7 +814,7 @@ function DataManagement({
           <div className="bg-gradient-to-br from-green-50 to-green-100 p-5 rounded-xl border border-green-200 shadow-sm hover:shadow-md transition-all duration-200">
             <div className="flex items-center justify-between">
               <div>
-                <div className="text-green-600 text-sm font-medium mb-1">전체 게임 수</div>
+                <div className="text-green-600 text-sm font-medium mb-1">지금까지 몇 게임 함?</div>
                 <div className="text-2xl font-bold text-green-700">
                   {loading ? '...' : (totalGamesCount || 0).toLocaleString()}
                 </div>
@@ -811,7 +829,7 @@ function DataManagement({
           <div className="bg-gradient-to-br from-orange-50 to-orange-100 p-5 rounded-xl border border-orange-200 shadow-sm hover:shadow-md transition-all duration-200">
             <div className="flex items-center justify-between">
               <div>
-                <div className="text-orange-600 text-sm font-medium mb-1">소모된 셔틀콕</div>
+                <div className="text-orange-600 text-sm font-medium mb-1">지금까지 콕 몇개 썼음?</div>
                 <div className="text-2xl font-bold text-orange-700">
                   {loading ? '...' : (totalShuttlesCount || 0).toLocaleString()}
                 </div>

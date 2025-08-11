@@ -7,7 +7,7 @@ import PageNavigation from "@/components/PageNavigation";
 import { AlertProvider } from "@/components/CustomAlert";
 import FullscreenButton from "@/components/FullscreenButton";
 import PWAInstallPrompt from "@/components/PWAInstallPrompt";
-import FirebaseDebug from "@/components/FirebaseDebug";
+import SupabaseDebug from "@/components/SupabaseDebug";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -91,7 +91,7 @@ export default function RootLayout({
                   height={32}
                   className="rounded-lg"
                 />
-                <span className="text-lg font-semibold text-gray-900">N.M.D.R</span>
+                <span className="text-xl font-semibold text-gray-900">N.M.D.R</span>
               </Link>
 
               {/* 페이지 네비게이션 */}
@@ -125,8 +125,8 @@ export default function RootLayout({
           {/* PWA 설치 프롬프트 */}
           <PWAInstallPrompt />
 
-          {/* Firebase 디버그 (개발 환경에서만) */}
-          <FirebaseDebug />
+          {/* Supabase 디버그 (개발 환경에서만) */}
+          <SupabaseDebug />
         </AlertProvider>
       </body>
     </html>

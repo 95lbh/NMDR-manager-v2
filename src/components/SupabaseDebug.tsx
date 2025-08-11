@@ -1,10 +1,9 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { db } from '@/lib/firebase';
-import { collection, getDocs } from 'firebase/firestore';
+import { testSupabaseConnection } from '@/lib/supabase';
 
-export default function FirebaseDebug() {
+export default function SupabaseDebug() {
   const [status, setStatus] = useState<{
     config: boolean;
     connection: boolean;
@@ -15,12 +14,12 @@ export default function FirebaseDebug() {
   });
 
   useEffect(() => {
-    const checkFirebase = async () => {
+    const checkSupabase = async () => {
       try {
         // 환경변수 확인
         const configCheck = !!(
-          process.env.NEXT_PUBLIC_FIREBASE_API_KEY &&
-          process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID
+          process.env.NEXT_PUBLIC_SUPABASE_URL &&
+          process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
         );
 
         setStatus(prev => ({ ...prev, config: configCheck }));
@@ -28,18 +27,21 @@ export default function FirebaseDebug() {
         if (!configCheck) {
           setStatus(prev => ({ 
             ...prev, 
-            error: '환경변수가 설정되지 않았습니다.' 
+            error: 'Supabase 환경변수가 설정되지 않았습니다.' 
           }));
           return;
         }
 
-        // Firestore 연결 테스트
-        const testCollection = collection(db, 'test');
-        await getDocs(testCollection);
+        // Supabase 연결 테스트
+        const result = await testSupabaseConnection();
         
-        setStatus(prev => ({ ...prev, connection: true }));
+        setStatus(prev => ({ 
+          ...prev, 
+          connection: result.success,
+          error: result.success ? undefined : result.error
+        }));
       } catch (error) {
-        console.error('Firebase 연결 오류:', error);
+        console.error('Supabase 연결 오류:', error);
         setStatus(prev => ({ 
           ...prev, 
           connection: false,
@@ -48,7 +50,7 @@ export default function FirebaseDebug() {
       }
     };
 
-    checkFirebase();
+    checkSupabase();
   }, []);
 
   // 개발 환경에서만 표시
@@ -57,8 +59,8 @@ export default function FirebaseDebug() {
   }
 
   return (
-    <div className="fixed bottom-4 left-4 bg-gray-900 text-white p-4 rounded-lg text-sm max-w-sm z-50">
-      <h3 className="font-bold mb-2">🔥 Firebase 상태</h3>
+    <div className="fixed bottom-4 right-4 bg-blue-900 text-white p-4 rounded-lg text-sm max-w-sm z-50">
+      <h3 className="font-bold mb-2">🚀 Supabase 상태</h3>
       
       <div className="space-y-1">
         <div className="flex items-center gap-2">
@@ -68,7 +70,7 @@ export default function FirebaseDebug() {
         
         <div className="flex items-center gap-2">
           <span className={status.connection ? '✅' : '❌'}></span>
-          <span>Firestore: {status.connection ? '연결됨' : '연결 실패'}</span>
+          <span>Database: {status.connection ? '연결됨' : '연결 실패'}</span>
         </div>
       </div>
 
@@ -79,8 +81,8 @@ export default function FirebaseDebug() {
       )}
 
       <div className="mt-2 text-xs opacity-75">
-        <div>API Key: {process.env.NEXT_PUBLIC_FIREBASE_API_KEY ? '설정됨' : '누락'}</div>
-        <div>Project ID: {process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || '누락'}</div>
+        <div>URL: {process.env.NEXT_PUBLIC_SUPABASE_URL ? '설정됨' : '누락'}</div>
+        <div>Key: {process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ? '설정됨' : '누락'}</div>
       </div>
     </div>
   );
