@@ -958,7 +958,7 @@ function DataManagement({
                     <div key={skill} className="flex items-center gap-3">
                       <div className="flex items-center gap-2 w-16">
                         <span className="w-3 h-3 rounded-full bg-gradient-to-r" style={{background: `linear-gradient(to right, ${colors[index]?.replace('from-', '').replace('to-', '').replace('-400', '').replace('-500', '')})`}}></span>
-                        <span className="text-sm font-semibold text-gray-700">{skill}급</span>
+                        <span className="text-sm font-semibold text-gray-700">{skill} 조</span>
                       </div>
                       <div className="flex-1 bg-gray-100 rounded-full h-3 overflow-hidden">
                         <div
