@@ -470,6 +470,42 @@ function MemberManagement({
   onUpdateMember: (member: Member) => void;
 }) {
   const [editingMember, setEditingMember] = useState<Member | null>(null);
+  const [sortBy, setSortBy] = useState<'name' | 'age' | 'skill' | 'gender'>('name');
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
+
+  // 정렬된 회원 목록
+  const sortedMembers = [...members].sort((a, b) => {
+    let comparison = 0;
+
+    switch (sortBy) {
+      case 'name':
+        comparison = a.name.localeCompare(b.name);
+        break;
+      case 'age':
+        comparison = b.birthYear - a.birthYear; // 나이는 출생년도 역순 (최신년도가 어린 나이)
+        break;
+      case 'skill':
+        const skillOrder = ['S', 'A', 'B', 'C', 'D', 'E', 'F'];
+        comparison = skillOrder.indexOf(a.skill) - skillOrder.indexOf(b.skill);
+        break;
+      case 'gender':
+        comparison = a.gender.localeCompare(b.gender);
+        break;
+    }
+
+    return sortOrder === 'asc' ? comparison : -comparison;
+  });
+
+  const handleSortChange = (newSortBy: typeof sortBy) => {
+    if (sortBy === newSortBy) {
+      // 같은 기준이면 순서 토글
+      setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
+    } else {
+      // 다른 기준이면 새로운 기준으로 오름차순
+      setSortBy(newSortBy);
+      setSortOrder('asc');
+    }
+  };
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between mb-6">
@@ -483,7 +519,7 @@ function MemberManagement({
           </h2>
         </div>
         <div className="flex items-center gap-2">
-          <span className="bg-blue-100 text-blue-700 px-3 py-1 rounded-full text-sm font-medium">
+          <span className="bg-blue-100 text-blue-700 px-5 py-2 rounded-full text-lg font-medium">
             총 {members.length}명
           </span>
         </div>
@@ -511,15 +547,64 @@ function MemberManagement({
           style={{ borderColor: "var(--notion-border)" }}
         >
           <div
-            className="p-4 border-b"
+            className="p-4 border-b flex items-center justify-between"
             style={{ borderColor: "var(--notion-border)" }}
           >
             <h3 className="font-medium" style={{ color: "var(--notion-text)" }}>
               회원 목록
             </h3>
+
+            {/* 정렬 옵션 */}
+            <div className="flex items-center gap-2">
+              <span className="text-m font-medium" style={{ color: "var(--notion-text)" }}>
+                정렬 기준 |
+              </span>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => handleSortChange('name')}
+                  className={`px-3 py-1 rounded text-s font-medium transition-colors font-semibold ${
+                    sortBy === 'name'
+                      ? 'bg-blue-500 text-white'
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  }`}
+                >
+                  이름 {sortBy === 'name' && (sortOrder === 'asc' ? '↑' : '↓')}
+                </button>
+                <button
+                  onClick={() => handleSortChange('age')}
+                  className={`px-3 py-1 rounded text-s font-medium transition-colors font-semibold ${
+                    sortBy === 'age'
+                      ? 'bg-blue-500 text-white'
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  }`}
+                >
+                  나이 {sortBy === 'age' && (sortOrder === 'asc' ? '↑' : '↓')}
+                </button>
+                <button
+                  onClick={() => handleSortChange('skill')}
+                  className={`px-3 py-1 rounded text-s font-medium transition-colors font-semibold ${
+                    sortBy === 'skill'
+                      ? 'bg-blue-500 text-white'
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  }`}
+                >
+                  실력 {sortBy === 'skill' && (sortOrder === 'asc' ? '↑' : '↓')}
+                </button>
+                <button
+                  onClick={() => handleSortChange('gender')}
+                  className={`px-3 py-1 rounded text-s font-medium transition-colors font-semibold ${
+                    sortBy === 'gender'
+                      ? 'bg-blue-500 text-white'
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  }`}
+                >
+                  성별 {sortBy === 'gender' && (sortOrder === 'asc' ? '↑' : '↓')}
+                </button>
+              </div>
+            </div>
           </div>
           <div className="max-h-96 overflow-auto">
-            {members.map((member) => (
+            {sortedMembers.map((member) => (
               <div
                 key={member.id}
                 className="flex items-center justify-between p-4 border-b last:border-b-0"
@@ -567,7 +652,7 @@ function MemberManagement({
                 </div>
               </div>
             ))}
-            {members.length === 0 && (
+            {sortedMembers.length === 0 && (
               <div
                 className="text-center py-12"
                 style={{ color: "var(--notion-text-light)" }}
@@ -814,7 +899,7 @@ function DataManagement({
               <div>
                 <div className="text-green-600 text-sm font-medium mb-1">지금까지 몇 게임 함?</div>
                 <div className="text-2xl font-bold text-green-700">
-                  {loading ? '...' : (totalGamesCount || 0).toLocaleString()}
+                  {loading ? '...' : Math.floor((totalGamesCount || 0) / 4).toLocaleString()}
                 </div>
                 <div className="text-green-500 text-xs">게임</div>
               </div>
