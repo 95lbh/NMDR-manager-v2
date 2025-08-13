@@ -7,17 +7,47 @@ import { useAlert } from '@/components/CustomAlert';
 import ConfirmModal from '@/components/ConfirmModal';
 const SKILLS: Skill[] = ['S','A','B','C','D','E','F'];
 
+// 초성 계산 유틸
+const CHOSEONG_LIST = [
+  'ㄱ','ㄲ','ㄴ','ㄷ','ㄸ','ㄹ','ㅁ','ㅂ','ㅃ','ㅅ','ㅆ','ㅇ','ㅈ','ㅉ','ㅊ','ㅋ','ㅌ','ㅍ','ㅎ'
+] as const;
+
+// 전화번호부 스타일 정렬 순서(쌍자음은 기본자음으로 합침)
+const GROUP_ORDER = ['ㄱ','ㄴ','ㄷ','ㄹ','ㅁ','ㅂ','ㅅ','ㅇ','ㅈ','ㅊ','ㅋ','ㅌ','ㅍ','ㅎ','#'] as const;
+
+// 쌍자음 → 기본자음 매핑
+const MERGE_DOUBLE: Record<string, string> = {
+  'ㄲ':'ㄱ','ㄸ':'ㄷ','ㅃ':'ㅂ','ㅆ':'ㅅ','ㅉ':'ㅈ'
+};
+
+function getInitialConsonant(name: string): string {
+  const ch = (name ?? '').trim().charAt(0);
+  if (!ch) return '#';
+  const code = ch.charCodeAt(0);
+
+  // 한글 음절 범위
+  if (code >= 0xAC00 && code <= 0xD7A3) {
+    const idx = Math.floor((code - 0xAC00) / (21 * 28)); // 초성 인덱스
+    let cho = CHOSEONG_LIST[idx] as string;
+    if (MERGE_DOUBLE[cho]) cho = MERGE_DOUBLE[cho];
+    return cho;
+  }
+  return '#';
+}
+
 // 등급별 색상 시스템
-const getSkillColor = (skill: Skill) => {
+// const getSkillColor = (skill: Skill) => {
+const getSkillColor = (skill: Gender) => {
   switch (skill) {
-    case 'S': return 'border-purple-500 bg-purple-100 text-purple-700';
-    case 'A': return 'border-red-500 bg-red-100 text-red-700';
-    case 'B': return 'border-orange-500 bg-orange-100 text-orange-700';
-    case 'C': return 'border-yellow-500 bg-yellow-100 text-yellow-700';
-    case 'D': return 'border-green-500 bg-green-100 text-green-700';
-    case 'E': return 'border-blue-500 bg-blue-100 text-blue-700';
-    case 'F': return 'border-gray-500 bg-gray-100 text-gray-700';
-    default: return 'border-gray-500 bg-gray-100 text-gray-700';
+    // case 'S': return 'border-purple-500 bg-purple-100 text-purple-700';
+    // case 'A': return 'border-red-500 bg-red-100 text-red-700';
+    // case 'B': return 'border-orange-500 bg-orange-100 text-orange-700';
+    // case 'C': return 'border-yellow-500 bg-yellow-100 text-yellow-700';
+    // case 'D': return 'border-green-500 bg-green-100 text-green-700';
+    // case 'E': return 'border-blue-500 bg-blue-100 text-blue-700';
+    // case 'F': return 'border-gray-500 bg-gray-100 text-gray-700';     
+    case 'M': return 'border-blue-400 bg-blue-100 text-blue-700';
+    default : return 'border-pink-400 bg-pink-100 text-pink-700';
   }
 };
 
@@ -217,7 +247,7 @@ export default function AttendancePage() {
           <div className="flex gap-6 h-full">
             {/* 좌측: 미출석 회원 (2/3 비율) */}
             <div className="flex-[2]">
-              <div className="mb-6">
+              <div className="mb-2">
                 <div className="flex items-center gap-3 mb-2">
                   <h2 className="text-lg font-semibold" style={{color: 'var(--notion-text)'}}>미출석 회원</h2>
                   <div className="flex items-center gap-2">
@@ -228,46 +258,82 @@ export default function AttendancePage() {
                   </div>
                 </div>
               </div>
-              <div className="grid grid-cols-4 gap-3">
-                {members
-                  .filter(m => !todayParticipants.some((tp): tp is Extract<AttendanceParticipant, {type:'member'}> => tp.type==='member' && tp.memberId === m.id))
-                  .sort((a, b) => a.name.localeCompare(b.name))
-                  .map((m) => (
-                  <div
-                    key={m.id}
-                    className={`border-2 rounded-lg p-2 cursor-pointer hover:shadow-md transition-all duration-200 ${
-                      m.gender === 'M'
-                        ? 'border-blue-300 bg-blue-50 hover:border-blue-400'
-                        : 'border-red-300 bg-red-50 hover:border-red-400'
-                    }`}
-                    onClick={()=>{
-                      setSelectedMember(m);
-                      setSelectedShuttles(0);
-                      setShowShuttleModal(true);
-                    }}
-                  >
-                    <div className="flex items-center gap-3">
-                      {/* 아바타 (등급별 색상) - 크기 축소 */}
-                      <div className={`w-8 h-8 rounded-full border-2 flex items-center justify-center text-xs font-bold ${getSkillColor(m.skill)}`}>
-                        {m.skill}
-                      </div>
+              {(() => {
+                // 필터 + 정렬(이름 가나다순)
+                const filteredMembers = members
+                  .filter(m => !todayParticipants.some(
+                    (tp): tp is Extract<AttendanceParticipant, {type:'member'}> =>
+                      tp.type === 'member' && tp.memberId === m.id
+                  ))
+                  .sort((a, b) => a.name.localeCompare(b.name, 'ko'));
 
-                      {/* 이름 - 크기 증가 및 굵게 */}
-                      <div className="flex-1 min-w-0">
-                        <div className="text-base font-bold truncate" style={{color: 'var(--notion-text)'}}>{m.name}</div>
-                      </div>
+                // 초성별 그룹화
+                const groups = filteredMembers.reduce((acc: Record<string, typeof members>, m) => {
+                  const key = getInitialConsonant(m.name);
+                  (acc[key] ||= []).push(m);
+                  return acc;
+                }, {});
 
-                      {/* 성별 배지 */}
-                      <div className={`px-2 py-1 rounded text-xs font-medium ${
-                        m.gender === 'M' ? 'bg-blue-100 text-blue-700' : 'bg-red-100 text-red-700'
-                      }`}>
-                        {m.gender === 'M' ? '남성' : '여성'}
-                      </div>
-                    </div>
+                return (
+                  <div className="space-y-1">
+                    {GROUP_ORDER.map((key) => {
+                      const list = groups[key];
+                      if (!list || list.length === 0) return null;
 
+                      return (
+                        <section key={key}>
+                          {/* 섹션 헤더 */}
+                          <div className="flex items-center gap-2 mb-1">
+                            <div className="text-lg font-extrabold tracking-widest">{key}</div>
+                            <div className="h-px flex-1 bg-gray-500" />
+                          </div>
+
+                          {/* 카드 그리드 */}
+                          <div className="grid grid-cols-4 gap-2">
+                            {list.map((m) => (
+                              <div
+                                key={m.id}
+                                className={`border-2 rounded-lg p-2 cursor-pointer hover:shadow-md transition-all duration-200 ${
+                                  m.gender === 'M'
+                                    ? 'border-blue-300 bg-blue-50 hover:border-blue-400'
+                                    : 'border-red-300 bg-red-50 hover:border-red-400'
+                                }`}
+                                onClick={() => {
+                                  setSelectedMember(m);
+                                  setSelectedShuttles(0);
+                                  setShowShuttleModal(true);
+                                }}
+                              >
+                                <div className="flex items-center gap-3">
+                                  {/* 아바타(등급/성별 색상) */}
+                                  {/* <div className={`w-8 h-8 rounded-full border-2 flex items-center justify-center text-xs font-bold ${getSkillColor(m.skill)}`}> */}
+                                  <div className={`w-8 h-8 rounded-full border-2 flex items-center justify-center text-xs font-bold ${getSkillColor(m.gender)}`}>
+                                    {m.skill}
+                                  </div>
+
+                                  {/* 이름 */}
+                                  <div className="flex-1 min-w-0">
+                                    <div className="text-base font-bold truncate" style={{ color: 'var(--notion-text)' }}>
+                                      {m.name}
+                                    </div>
+                                  </div>
+
+                                  {/* 성별 배지 */}
+                                  <div className={`px-2 py-1 rounded text-xs font-semibold ${
+                                    m.gender === 'M' ? 'bg-blue-100 text-blue-700' : 'bg-red-100 text-red-700'
+                                  }`}>
+                                    {m.gender === 'M' ? '남' : '여'}
+                                  </div>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </section>
+                      );
+                    })}
                   </div>
-                ))}
-              </div>
+                );
+              })()}
             </div>
 
             {/* 중앙 구분선 */}
@@ -315,7 +381,8 @@ export default function AttendancePage() {
                       <div className="flex items-center gap-3">
                         {/* 아바타 (등급별 색상) - 크기 축소 */}
                         <div className={`w-8 h-8 rounded-full border-2 flex items-center justify-center text-xs font-bold ${
-                          member?.skill ? getSkillColor(member.skill) : 'border-gray-500 bg-gray-100 text-gray-700'
+                          // member?.skill ? getSkillColor(member.skill) : 'border-gray-500 bg-gray-100 text-gray-700'
+                          member?.skill ? getSkillColor(member.gender) : 'border-gray-500 bg-gray-100 text-gray-700'
                         }`}>
                           {member?.skill}
                         </div>
@@ -357,7 +424,8 @@ export default function AttendancePage() {
                   >
                     <div className="flex items-center gap-3">
                       {/* 아바타 (등급별 색상) - 크기 축소 */}
-                      <div className={`w-8 h-8 rounded-full border-2 flex items-center justify-center text-xs font-bold ${getSkillColor(p.skill)}`}>
+                      {/* <div className={`w-8 h-8 rounded-full border-2 flex items-center justify-center text-xs font-bold ${getSkillColor(p.skill)}`}> */}
+                      <div className={`w-8 h-8 rounded-full border-2 flex items-center justify-center text-xs font-bold ${getSkillColor(p.gender)}`}>
                         {p.skill}
                       </div>
 
@@ -492,7 +560,7 @@ export default function AttendancePage() {
               ))}
             </div>
           </div>
-          <div className="flex justify-center mt-6">
+          <div className="flex justify-center mt-4">
             <button
               onClick={async ()=>{
                 try {
@@ -514,7 +582,7 @@ export default function AttendancePage() {
                   showAlert(msg, 'error');
                 }
               }}
-              className="w-full notion-btn notion-btn-success px-8 py-4 text-xl font-semibold"
+              className="w-full h-20 notion-btn notion-btn-success px-8 py-6 !text-2xl font-semibold"
             >
               출석 완료
             </button>

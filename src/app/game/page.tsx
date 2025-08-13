@@ -445,7 +445,7 @@ export default function GamePage() {
     const males = selectablePlayers.filter(p => p.gender === 'M');
 
     if (males.length < 4) {
-      alert('선택 가능한 남자 플레이어가 4명 미만입니다.');
+      showAlert('선택 가능한 남자 플레이어가 4명 미만입니다.', 'warning');
       return;
     }
 
@@ -459,7 +459,7 @@ export default function GamePage() {
     const females = selectablePlayers.filter(p => p.gender === 'F');
 
     if (females.length < 4) {
-      alert('선택 가능한 여자 플레이어가 4명 미만입니다.');
+      showAlert('선택 가능한 여자 플레이어가 4명 미만입니다.', 'warning');
       return;
     }
 
@@ -474,7 +474,7 @@ export default function GamePage() {
     const females = selectablePlayers.filter(p => p.gender === 'F');
 
     if (males.length < 2 || females.length < 2) {
-      alert('혼복을 위해서는 남자 2명, 여자 2명이 필요합니다.');
+      showAlert('혼복을 위해서는 남자 2명, 여자 2명이 필요합니다.', 'warning');
       return;
     }
 
