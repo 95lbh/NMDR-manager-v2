@@ -98,9 +98,9 @@ export default function SettingsPage() {
     try {
       await updateMemberSkill(member.id, newSkill);
       await refreshData(); // 데이터 새로고침
-      showAlert("실력 등급이 수정되었습니다.", 'success');
+      showAlert("급수가 수정되었습니다.", 'success');
     } catch {
-      showAlert("실력 등급 수정에 실패했습니다.", 'error');
+      showAlert("급수가 수정에 실패했습니다.", 'error');
     }
   };
 
@@ -588,7 +588,7 @@ function MemberManagement({
                       : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                   }`}
                 >
-                  실력 {sortBy === 'skill' && (sortOrder === 'asc' ? '↑' : '↓')}
+                  급수 {sortBy === 'skill' && (sortOrder === 'asc' ? '↑' : '↓')}
                 </button>
                 <button
                   onClick={() => handleSortChange('gender')}
