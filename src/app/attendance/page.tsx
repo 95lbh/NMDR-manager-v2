@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { createMember, listMembers, markAttendance, getTodayAttendance, removeAttendance } from '@/lib/supabase-db';
 import type { Gender, Skill, Member, AttendanceParticipant } from '@/types/db';
 import { useAlert } from '@/components/CustomAlert';
+import { usePreventDuplicate } from '@/hooks/useGameState';
 import ConfirmModal from '@/components/ConfirmModal';
 const SKILLS: Skill[] = ['S','A','B','C','D','E','F'];
 
@@ -53,6 +54,7 @@ const getSkillColor = (skill: Gender) => {
 
 export default function AttendancePage() {
   const { showAlert } = useAlert();
+  const { executeOnce } = usePreventDuplicate();
   const [members, setMembers] = useState<Member[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -64,6 +66,7 @@ export default function AttendancePage() {
   const [showShuttleModal, setShowShuttleModal] = useState(false);
   const [selectedMember, setSelectedMember] = useState<Member | null>(null);
   const [selectedShuttles, setSelectedShuttles] = useState(0);
+  const [isSubmittingAttendance, setIsSubmittingAttendance] = useState(false);
 
   // 확인 모달 상태
   const [showConfirmModal, setShowConfirmModal] = useState(false);
@@ -563,28 +566,42 @@ export default function AttendancePage() {
           <div className="flex justify-center mt-4">
             <button
               onClick={async ()=>{
-                try {
-                  await markAttendance({
-                    participant: {
-                      type: 'member',
-                      memberId: selectedMember.id,
-                      name: selectedMember.name,
-                      skill: selectedMember.skill
-                    },
-                    shuttles: selectedShuttles,
-                  });
-                  setShowShuttleModal(false);
-                  setSelectedMember(null);
-                  const today = await getTodayAttendance();
-                  setTodayParticipants(today.participants);
-                } catch (e) {
-                  const msg = e instanceof Error ? e.message : '출석 처리 실패';
-                  showAlert(msg, 'error');
+                if (isSubmittingAttendance) return; // 중복 클릭 방지
+
+                const result = await executeOnce(`attendance-${selectedMember.id}`, async () => {
+                  setIsSubmittingAttendance(true);
+                  try {
+                    await markAttendance({
+                      participant: {
+                        type: 'member',
+                        memberId: selectedMember.id,
+                        name: selectedMember.name,
+                        skill: selectedMember.skill
+                      },
+                      shuttles: selectedShuttles,
+                    });
+                    setShowShuttleModal(false);
+                    setSelectedMember(null);
+                    const today = await getTodayAttendance();
+                    setTodayParticipants(today.participants);
+                    return true;
+                  } catch (e) {
+                    const msg = e instanceof Error ? e.message : '출석 처리 실패';
+                    showAlert(msg, 'error');
+                    throw e;
+                  } finally {
+                    setIsSubmittingAttendance(false);
+                  }
+                });
+
+                if (!result) {
+                  showAlert('이미 처리 중인 요청입니다.', 'warning');
                 }
               }}
-              className="w-full h-20 notion-btn notion-btn-success px-8 py-6 !text-2xl font-semibold"
+              disabled={isSubmittingAttendance}
+              className="w-full h-20 notion-btn notion-btn-success px-8 py-6 !text-2xl font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              출석 완료
+              {isSubmittingAttendance ? '처리 중...' : '출석 완료'}
             </button>
           </div>
         </div>

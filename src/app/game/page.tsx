@@ -5,13 +5,15 @@ import { getAppSettings, listMembers, getTodayAttendance, updatePlayerGameStats,
 import type { AppSettings } from '@/types/settings';
 import type { Skill, Gender } from '@/types/db';
 import { useAlert } from '@/components/CustomAlert';
+import { useGameState, usePreventDuplicate } from '@/hooks/useGameState';
+import { ConflictResolver, SyncStatusIndicator } from '@/components/ConflictResolver';
 interface Player {
   id: string;
   name: string;
   skill: Skill;
   gender: Gender;
   gamesPlayedToday: number;
-  isGuest?: boolean;
+  isGuest: boolean;
 }
 
 interface Team {
@@ -50,6 +52,16 @@ interface GameState {
 
 export default function GamePage() {
   const { showAlert } = useAlert();
+  const {
+    gameState: savedGameState,
+    syncStatus,
+    saveGameState: saveLocalGameState,
+    loadGameState: loadLocalGameState,
+    syncWithServer,
+    resolveConflict
+  } = useGameState();
+  const { executeOnce } = usePreventDuplicate();
+
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [courts, setCourts] = useState<Court[]>([]);
   const [teams, setTeams] = useState<Team[]>([]);
@@ -59,6 +71,8 @@ export default function GamePage() {
   const [showPlayerModal, setShowPlayerModal] = useState(false);
   const [loading, setLoading] = useState(true);
   const [currentTime, setCurrentTime] = useState(new Date());
+  const [finishingGames, setFinishingGames] = useState<Set<number>>(new Set());
+
 
   // 플레이어 통계 새로고침
   const refreshPlayerStats = async () => {
@@ -249,21 +263,90 @@ export default function GamePage() {
     })();
   }, []);
 
-  // 게임 상태 변경 시 자동 저장
+  // 게임 상태 변경 시 자동 저장 (디바운싱)
   useEffect(() => {
     if (!loading && (courts.length > 0 || teams.length > 0)) {
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      const gameState = {
-        teams: teams.map(team => ({
-          ...team,
-          createdAt: team.createdAt.toISOString()
-        }))
-      };
-      // saveGameState(gameState).catch(error => {
-      //   console.error('게임 상태 자동 저장 실패:', error);
-      // });
+      const timeoutId = setTimeout(() => {
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        const gameState = {
+          teams: teams.map(team => ({
+            ...team,
+            createdAt: team.createdAt.toISOString()
+          }))
+        };
+        // 로컬 게임 상태 저장
+        saveLocalGameState(courts, teams, availablePlayers);
+      }, 500); // 500ms 디바운싱
+
+      return () => clearTimeout(timeoutId);
     }
-  }, [courts, teams, loading]);
+  }, [courts, teams, loading, availablePlayers, saveLocalGameState]);
+
+  // 저장된 게임 상태 복원
+  useEffect(() => {
+    console.log('게임 상태 복원 체크:', {
+      savedGameState: !!savedGameState,
+      loading,
+      courtsLength: courts.length,
+      teamsLength: teams.length
+    });
+
+    if (savedGameState && !loading) {
+      console.log('저장된 게임 상태 복원:', savedGameState);
+
+      // 저장된 상태가 있고 현재 상태가 완전히 비어있는 경우에만 복원
+      // (게임 종료 후 복원 방지)
+      const hasActiveGames = courts.some(court => court.status === 'playing' || court.team);
+      const hasTeams = teams.length > 0;
+      const shouldRestore = savedGameState.courts.length > 0 &&
+                           !hasActiveGames &&
+                           !hasTeams &&
+                           courts.length > 0 &&
+                           (savedGameState.teams.length > 0 || savedGameState.courts.some(c => c.team));
+
+      if (shouldRestore) {
+        // 코트 상태 복원 (타입 변환)
+        const restoredCourts: Court[] = savedGameState.courts.map(court => ({
+          id: court.id,
+          status: court.status as 'idle' | 'playing' | 'finished',
+          team: court.team ? {
+            id: court.team.id,
+            players: court.team.players.map(player => ({
+              id: player.id,
+              name: player.name,
+              skill: player.skill as Skill,
+              gender: player.gender as Gender,
+              isGuest: player.isGuest,
+              gamesPlayedToday: player.gamesPlayedToday
+            })),
+            createdAt: new Date(court.team.createdAt)
+          } : undefined,
+          startedAt: court.startedAt ? new Date(court.startedAt) : undefined,
+          duration: court.duration
+        }));
+        setCourts(restoredCourts);
+
+        // 팀 상태 복원 (타입 변환)
+        if (savedGameState.teams.length > 0) {
+          const restoredTeams: Team[] = savedGameState.teams.map(team => ({
+            id: team.id,
+            players: team.players.map(player => ({
+              id: player.id,
+              name: player.name,
+              skill: player.skill as Skill,
+              gender: player.gender as Gender,
+              isGuest: player.isGuest,
+              gamesPlayedToday: player.gamesPlayedToday
+            })),
+            createdAt: new Date(team.createdAt)
+          }));
+          setTeams(restoredTeams);
+        }
+
+        // showAlert('이전 게임 상태가 복원되었습니다.', 'success');
+      }
+    }
+  }, [savedGameState, loading, courts, teams, showAlert]);
 
   // 실시간 타이머 업데이트
   useEffect(() => {
@@ -347,39 +430,57 @@ export default function GamePage() {
 
   // 게임 종료
   const finishGame = async (courtId: number) => {
-    const court = courts.find(c => c.id === courtId);
-    if (court && court.team) {
-      // 플레이어들의 게임 수 증가 (로컬 상태)
-      const updatedPlayers = availablePlayers.map(player => {
-        const isInTeam = court.team!.players.some(teamPlayer => teamPlayer.id === player.id);
-        return isInTeam
-          ? { ...player, gamesPlayedToday: player.gamesPlayedToday + 1 }
-          : player;
-      });
-      setAvailablePlayers(updatedPlayers);
+    // 중복 클릭 방지
+    if (finishingGames.has(courtId)) return;
 
-      // 데이터베이스에 게임 통계 업데이트
-      try {
-        for (const player of court.team.players) {
-          await updatePlayerGameStats(
-            player.id,
-            player.name,
-            player.isGuest ? 'guest' : 'member'
-          );
+    setFinishingGames(prev => new Set(prev).add(courtId));
+
+    try {
+      const court = courts.find(c => c.id === courtId);
+      if (court && court.team) {
+        // 플레이어들의 게임 수 증가 (로컬 상태)
+        const updatedPlayers = availablePlayers.map(player => {
+          const isInTeam = court.team!.players.some(teamPlayer => teamPlayer.id === player.id);
+          return isInTeam
+            ? { ...player, gamesPlayedToday: player.gamesPlayedToday + 1 }
+            : player;
+        });
+        setAvailablePlayers(updatedPlayers);
+
+        // 데이터베이스에 게임 통계 업데이트
+        try {
+          for (const player of court.team.players) {
+            await updatePlayerGameStats(
+              player.id,
+              player.name,
+              player.isGuest ? 'guest' : 'member'
+            );
+          }
+        } catch (error) {
+          console.error('게임 통계 업데이트 실패:', error);
         }
-      } catch (error) {
-        console.error('게임 통계 업데이트 실패:', error);
-      }
 
-      // 플레이어 통계 새로고침
-      await refreshPlayerStats();
+        // 플레이어 통계 새로고침
+        await refreshPlayerStats();
+      }
+    } finally {
+      setFinishingGames(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(courtId);
+        return newSet;
+      });
     }
 
-    setCourts(courts.map(court =>
+    const updatedCourts = courts.map(court =>
       court.id === courtId
-        ? { ...court, status: 'idle', team: undefined, startedAt: undefined }
+        ? { ...court, status: 'idle' as const, team: undefined, startedAt: undefined }
         : court
-    ));
+    );
+
+    setCourts(updatedCourts);
+
+    // 게임 종료 후 즉시 상태 저장
+    saveLocalGameState(updatedCourts, teams, availablePlayers);
   };
 
   // 플레이어 상태 확인
@@ -769,9 +870,10 @@ export default function GamePage() {
                               e.stopPropagation();
                               finishGame(court.id);
                             }}
-                            className="px-3 py-3 bg-red-500 text-white rounded-md hover:bg-red-600 font-medium text-m"
+                            disabled={finishingGames.has(court.id)}
+                            className="px-3 py-3 bg-red-500 text-white rounded-md hover:bg-red-600 font-medium text-m disabled:opacity-50 disabled:cursor-not-allowed"
                           >
-                            게임 종료
+                            {finishingGames.has(court.id) ? '처리 중...' : '게임 종료'}
                           </button>
                         )}
                       </div>
@@ -909,70 +1011,145 @@ export default function GamePage() {
               </div>
 
               <div className="p-4 overflow-y-auto" style={{maxHeight: 'calc(90vh - 150px)'}}>
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
-                  {getSortedPlayers().map(player => {
-                    const status = getPlayerStatus(player.id);
-                    const isSelectable = status !== 'waiting'; // 대기 중인 플레이어만 제외
-                    const isSelected = selectedPlayers.find(p => p.id === player.id);
-
-                    return (
-                      <div
-                        key={player.id}
-                        onClick={() => isSelectable && togglePlayerSelection(player)}
-                        className={`p-3 rounded-xl border-2 transition-all duration-200 min-h-[90px] ${
-                          !isSelectable
-                            ? 'opacity-50 cursor-not-allowed bg-gray-50 border-gray-200'
-                            : isSelected
-                              ? 'bg-blue-50 border-blue-600 cursor-pointer shadow-md transform scale-105'
-                              : status === 'playing'
-                                ? 'bg-green-50 border-green-300 cursor-pointer hover:border-green-400 hover:shadow-md'
-                                : 'bg-white border-gray-400 hover:border-gray-300 cursor-pointer hover:shadow-md'
-                        }`}
-                      >
-                        {/* 1행: 중앙 상단 게임 상태 */}
-                        <div className="flex justify-center h-5 mb-2">
-                          {status !== 'available' && (
-                            <span className={`w-full text-center text-xs px-2 py-1 rounded-full font-medium ${
-                              status === 'playing' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'
-                            }`}>
-                              {status === 'playing' ? '게임중' : '대기중'}
-                            </span>
-                          )}
-                        </div>
-
-                        {/* 2행: 성별 점 + 이름 + 등급 (균일한 간격) */}
-                        <div className="flex items-center justify-between mb-2">
-                          <div className={`w-3 h-3 rounded-full ${
-                            player.gender === 'M' ? 'bg-blue-500' : 'bg-pink-500'
-                          }`}></div>
-                          <span className="font-semibold text-sm truncate flex-1 text-center" style={{color: 'var(--notion-text)'}} title={`${player.isGuest ? '(G) ' : ''}${player.name}`}>
-                            {player.isGuest ? '(G) ' : ''}{player.name}
-                          </span>
-                          <span className={`px-2 py-1 rounded text-xs font-medium ${
-                            player.skill === 'S' ? 'bg-red-100 text-red-700' :
-                            player.skill === 'A' ? 'bg-orange-100 text-orange-700' :
-                            player.skill === 'B' ? 'bg-yellow-100 text-yellow-700' :
-                            player.skill === 'C' ? 'bg-green-100 text-green-700' :
-                            'bg-blue-100 text-blue-700'
-                          }`}>
-                            {player.skill}
-                          </span>
-                        </div>
-
-                        {/* 3행: 중앙 게임 수 */}
-                        <div className="flex justify-center">
-                          <span className="text-xs text-gray-600">{player.gamesPlayedToday} 게임</span>
-                        </div>
+                {availablePlayers.length === 0 ? (
+                  <div className="text-center py-12 text-gray-500">
+                    <div className="text-xl mb-2">출석한 플레이어가 없습니다</div>
+                    <div className="text-sm">출석 관리에서 출석을 체크해주세요</div>
+                  </div>
+                ) : (
+                  <div className="flex gap-4">
+                    {/* 남자 플레이어 섹션 */}
+                    <div className="flex-1">
+                      <div className="flex items-center justify-center mb-4 pb-2 border-b-2 border-blue-200">
+                        <div className="w-4 h-4 rounded-full bg-blue-500 mr-2"></div>
+                        <h3 className="text-sm font-bold text-blue-700">남</h3>
                       </div>
-                    );
-                  })}
-                  {availablePlayers.length === 0 && (
-                    <div className="col-span-full text-center py-12 text-gray-500">
-                      <div className="text-xl mb-2">출석한 플레이어가 없습니다</div>
-                      <div className="text-sm">출석 관리에서 출석을 체크해주세요</div>
+                      <div className="grid grid-cols-3 gap-3">
+                        {getSortedPlayers().filter(player => player.gender === 'M').map(player => {
+                          const status = getPlayerStatus(player.id);
+                          const isSelectable = status !== 'waiting';
+                          const isSelected = selectedPlayers.find(p => p.id === player.id);
+
+                          return (
+                            <div
+                              key={player.id}
+                              onClick={() => isSelectable && togglePlayerSelection(player)}
+                              className={`p-3 rounded-xl border-2 transition-all duration-200 min-h-[90px] ${
+                                !isSelectable
+                                  ? 'opacity-50 cursor-not-allowed bg-gray-50 border-gray-200'
+                                  : isSelected
+                                    ? 'bg-blue-50 border-blue-600 cursor-pointer shadow-md transform scale-105'
+                                    : status === 'playing'
+                                      ? 'bg-green-50 border-green-300 cursor-pointer hover:border-green-400 hover:shadow-md'
+                                      : 'bg-white border-gray-400 hover:border-gray-300 cursor-pointer hover:shadow-md'
+                              }`}
+                            >
+                              {/* 1행: 중앙 상단 게임 상태 */}
+                              <div className="flex justify-center h-5 mb-1">
+                                {status !== 'available' && (
+                                  <span className={`w-full text-center text-xs px-2 py-1 rounded-full font-medium ${
+                                    status === 'playing' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'
+                                  }`}>
+                                    {status === 'playing' ? '게임중' : '대기중'}
+                                  </span>
+                                )}
+                              </div>
+
+                              {/* 2행: 성별 점 + 이름 + 등급 */}
+                              <div className="flex items-center justify-between mb-1 h-5">
+                                <div className="w-4 h-4 rounded-full bg-blue-500"></div>
+                                <span className="font-bold text-lg truncate flex-1 text-center" style={{color: 'var(--notion-text)'}} title={`${player.isGuest ? '(G) ' : ''}${player.name}`}>
+                                  {player.isGuest ? '(G) ' : ''}{player.name}
+                                </span>
+                                <span className={`px-2 py-1 rounded text-xs font-medium ${
+                                  player.skill === 'S' ? 'bg-red-100 text-red-700' :
+                                  player.skill === 'A' ? 'bg-orange-100 text-orange-700' :
+                                  player.skill === 'B' ? 'bg-yellow-100 text-yellow-700' :
+                                  player.skill === 'C' ? 'bg-green-100 text-green-700' :
+                                  'bg-blue-100 text-blue-700'
+                                }`}>
+                                  {player.skill}
+                                </span>
+                              </div>
+
+                              {/* 3행: 중앙 게임 수 */}
+                              <div className="flex justify-center">
+                                <span className="text-xs text-center text-gray-600 font-bold">오늘 {player.gamesPlayedToday} 게임 함</span>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
                     </div>
-                  )}
-                </div>
+
+                    {/* 구분선 */}
+                    <div className="w-px bg-gray-300"></div>
+
+                    {/* 여자 플레이어 섹션 */}
+                    <div className="flex-1">
+                      <div className="flex items-center justify-center mb-4 pb-2 border-b-2 border-pink-200">
+                        <div className="w-4 h-4 rounded-full bg-pink-500 mr-2"></div>
+                        <h3 className="text-sm font-bold text-pink-700">여</h3>
+                      </div>
+                      <div className="grid grid-cols-3 gap-3">
+                        {getSortedPlayers().filter(player => player.gender === 'F').map(player => {
+                          const status = getPlayerStatus(player.id);
+                          const isSelectable = status !== 'waiting';
+                          const isSelected = selectedPlayers.find(p => p.id === player.id);
+
+                          return (
+                            <div
+                              key={player.id}
+                              onClick={() => isSelectable && togglePlayerSelection(player)}
+                              className={`p-3 rounded-xl border-2 transition-all duration-200 min-h-[90px] ${
+                                !isSelectable
+                                  ? 'opacity-50 cursor-not-allowed bg-gray-50 border-gray-200'
+                                  : isSelected
+                                    ? 'bg-pink-50 border-pink-600 cursor-pointer shadow-md transform scale-105'
+                                    : status === 'playing'
+                                      ? 'bg-green-50 border-green-300 cursor-pointer hover:border-green-400 hover:shadow-md'
+                                      : 'bg-white border-gray-400 hover:border-gray-300 cursor-pointer hover:shadow-md'
+                              }`}
+                            >
+                              {/* 1행: 중앙 상단 게임 상태 */}
+                              <div className="flex justify-center h-5 mb-1">
+                                {status !== 'available' && (
+                                  <span className={`w-full text-center text-xs px-2 py-1 rounded-full font-medium ${
+                                    status === 'playing' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'
+                                  }`}>
+                                    {status === 'playing' ? '게임중' : '대기중'}
+                                  </span>
+                                )}
+                              </div>
+
+                              {/* 2행: 성별 점 + 이름 + 등급 */}
+                              <div className="flex items-center justify-between mb-1 h-5">
+                                <div className="w-4 h-4 rounded-full bg-pink-500"></div>
+                                <span className="font-bold text-lg truncate flex-1 text-center" style={{color: 'var(--notion-text)'}} title={`${player.isGuest ? '(G) ' : ''}${player.name}`}>
+                                  {player.isGuest ? '(G) ' : ''}{player.name}
+                                </span>
+                                <span className={`px-2 py-1 rounded text-xs font-medium ${
+                                  player.skill === 'S' ? 'bg-red-100 text-red-700' :
+                                  player.skill === 'A' ? 'bg-orange-100 text-orange-700' :
+                                  player.skill === 'B' ? 'bg-yellow-100 text-yellow-700' :
+                                  player.skill === 'C' ? 'bg-green-100 text-green-700' :
+                                  'bg-blue-100 text-blue-700'
+                                }`}>
+                                  {player.skill}
+                                </span>
+                              </div>
+
+                              {/* 3행: 중앙 게임 수 */}
+                              <div className="flex justify-center ">
+                                <span className="text-xs text-center text-gray-600 font-bold">오늘 {player.gamesPlayedToday} 게임 함</span>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -994,6 +1171,29 @@ export default function GamePage() {
           </div>
         )}
       </div>
+
+      {/* 동기화 상태 표시기 */}
+      <SyncStatusIndicator
+        syncStatus={syncStatus}
+        onSync={() => {
+          executeOnce('manual-sync', async () => {
+            await syncWithServer();
+            showAlert('동기화가 완료되었습니다.', 'success');
+          });
+        }}
+      />
+
+      {/* 충돌 해결 모달 */}
+      {syncStatus.conflicts.length > 0 && (
+        <ConflictResolver
+          conflicts={syncStatus.conflicts}
+          onResolve={(conflictId, resolution) => {
+            resolveConflict(conflictId, resolution);
+            showAlert(`충돌이 ${resolution === 'local' ? '로컬' : '서버'} 데이터로 해결되었습니다.`, 'success');
+          }}
+          onClose={() => {/* 충돌 해결 모달 닫기 */}}
+        />
+      )}
     </main>
   );
 }

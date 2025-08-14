@@ -100,7 +100,7 @@ export default function SettingsPage() {
       await refreshData(); // 데이터 새로고침
       showAlert("급수가 수정되었습니다.", 'success');
     } catch {
-      showAlert("급수가 수정에 실패했습니다.", 'error');
+      showAlert("급수 수정에 실패했습니다.", 'error');
     }
   };
 
@@ -1154,7 +1154,7 @@ function SystemInfo() {
             </div>
             <div className="flex justify-between items-center p-3 bg-gray-50 rounded-lg">
               <span style={{ color: "var(--notion-text)" }}>버전</span>
-              <span className="font-medium">v2.0.0</span>
+              <span className="font-medium">v2.1.0</span>
             </div>
             <div className="flex justify-between items-center p-3 bg-gray-50 rounded-lg">
               <span style={{ color: "var(--notion-text)" }}>
