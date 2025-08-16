@@ -63,8 +63,18 @@ export interface GameTeam {
   players: GamePlayer[];
 }
 
+// 게임 코트 인터페이스
+export interface GameCourt {
+  id: number;
+  status: 'idle' | 'playing' | 'finished';
+  team?: GameTeam;
+  startedAt?: string; // ISO 문자열
+  duration?: number;
+}
+
 // 게임 상태 인터페이스
 export interface GameState {
   teams: GameTeam[];
+  courts?: GameCourt[]; // 선택적으로 코트 정보도 포함
 }
 

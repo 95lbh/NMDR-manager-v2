@@ -561,6 +561,7 @@ export async function saveGameState(gameState: GameState): Promise<void> {
     .upsert({
       date: today,
       teams: gameState.teams,
+      courts: gameState.courts || [], // 코트 정보도 저장
       updated_at: new Date().toISOString()
     }, { onConflict: 'date' });
 
@@ -582,7 +583,10 @@ export async function loadGameState(): Promise<GameState | null> {
     throw new Error(`게임 상태 로드 실패: ${error.message}`);
   }
 
-  return data ? { teams: data.teams } : null;
+  return data ? {
+    teams: data.teams || [],
+    courts: data.courts || []
+  } : null;
 }
 
 // 실시간 게임 상태 구독
@@ -601,7 +605,10 @@ export function subscribeToGameState(callback: (gameState: GameState | null) => 
       },
       (payload) => {
         if (payload.new && typeof payload.new === 'object' && 'teams' in payload.new) {
-          callback({ teams: payload.new.teams });
+          callback({
+            teams: payload.new.teams || [],
+            courts: payload.new.courts || []
+          });
         }
       }
     )
