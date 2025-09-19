@@ -83,6 +83,9 @@ export default function AttendancePage() {
   const [gName, setGName] = useState('');
   const [gBirthYear, setGBirthYear] = useState<number | ''>('');
   const [gGender, setGGender] = useState<Gender>('M');
+
+  // 검색 상태
+  const [searchQuery, setSearchQuery] = useState('');
   const [gSkill, setGSkill] = useState<Skill>('C');
   const [gShuttles, setGShuttles] = useState(0);
 
@@ -250,24 +253,46 @@ export default function AttendancePage() {
           <div className="flex gap-6 h-full">
             {/* 좌측: 미출석 회원 (2/3 비율) */}
             <div className="flex-[2]">
-              <div className="mb-2">
-                <div className="flex items-center gap-3 mb-2">
-                  <h2 className="text-lg font-semibold" style={{color: 'var(--notion-text)'}}>미출석 회원</h2>
-                  <div className="flex items-center gap-2">
-                    <div className="w-2 h-2 bg-gray-400 rounded-full"></div>
-                    <span className="bg-gray-100 text-gray-700 px-3 py-1 rounded-full text-sm font-medium">
-                      {members.filter(m => !todayParticipants.some((tp): tp is Extract<AttendanceParticipant, {type:'member'}> => tp.type==='member' && tp.memberId === m.id)).length}명
-                    </span>
+              <div className="mb-4">
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-3">
+                    <h2 className="text-lg font-semibold" style={{color: 'var(--notion-text)'}}>미출석 회원</h2>
+                    <div className="flex items-center gap-2">
+                      <div className="w-2 h-2 bg-gray-400 rounded-full"></div>
+                      <span className="bg-gray-100 text-gray-700 px-3 py-1 rounded-full text-sm font-medium">
+                        {members.filter(m => !todayParticipants.some((tp): tp is Extract<AttendanceParticipant, {type:'member'}> => tp.type==='member' && tp.memberId === m.id)).length}명
+                      </span>
+                    </div>
+                  </div>
+                  {/* 검색 입력 필드 */}
+                  <div className="relative">
+                    <input
+                      type="text"
+                      placeholder="이름 검색..."
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      style={{minWidth: '200px'}}
+                    />
+                    {searchQuery && (
+                      <button
+                        onClick={() => setSearchQuery('')}
+                        className="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                      >
+                        ✕
+                      </button>
+                    )}
                   </div>
                 </div>
               </div>
               {(() => {
-                // 필터 + 정렬(이름 가나다순)
+                // 필터 + 검색 + 정렬(이름 가나다순)
                 const filteredMembers = members
                   .filter(m => !todayParticipants.some(
                     (tp): tp is Extract<AttendanceParticipant, {type:'member'}> =>
                       tp.type === 'member' && tp.memberId === m.id
                   ))
+                  .filter(m => searchQuery === '' || m.name.toLowerCase().includes(searchQuery.toLowerCase()))
                   .sort((a, b) => a.name.localeCompare(b.name, 'ko'));
 
                 // 초성별 그룹화

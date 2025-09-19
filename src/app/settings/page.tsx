@@ -137,7 +137,7 @@ export default function SettingsPage() {
 
   const tabs = [
     { id: "court" as TabType, name: "코트 설정", icon: "🏸" },
-    { id: "members" as TabType, name: "회원 관리", icon: "👥" },
+    { id: "members" as TabType, name: "회원 관리", icon: "📖" },
     { id: "data" as TabType, name: "데이터 관리", icon: "📊" },
     { id: "system" as TabType, name: "시스템 정보", icon: "⚙️" },
   ];
@@ -472,9 +472,12 @@ function MemberManagement({
   const [editingMember, setEditingMember] = useState<Member | null>(null);
   const [sortBy, setSortBy] = useState<'name' | 'age' | 'skill' | 'gender'>('name');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
+  const [searchQuery, setSearchQuery] = useState('');
 
-  // 정렬된 회원 목록
-  const sortedMembers = [...members].sort((a, b) => {
+  // 검색 및 정렬된 회원 목록
+  const filteredAndSortedMembers = [...members]
+    .filter(member => searchQuery === '' || member.name.toLowerCase().includes(searchQuery.toLowerCase()))
+    .sort((a, b) => {
     let comparison = 0;
 
     switch (sortBy) {
@@ -510,7 +513,7 @@ function MemberManagement({
     <div className="space-y-6">
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-3">
-          <span className="text-2xl">👥</span>
+          <span className="text-2xl">📖</span>
           <h2
             className="text-2xl font-bold"
             style={{ color: "var(--notion-text)" }}
@@ -518,7 +521,26 @@ function MemberManagement({
             회원 관리
           </h2>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-4">
+          {/* 검색 입력 필드 */}
+          <div className="relative">
+            <input
+              type="text"
+              placeholder="회원 이름 검색..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="px-5 py-3 border border-gray-500 rounded-lg text-m focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              style={{minWidth: '200px'}}
+            />
+            {searchQuery && (
+              <button
+                onClick={() => setSearchQuery('')}
+                className="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+              >
+                ✕
+              </button>
+            )}
+          </div>
           <span className="bg-blue-100 text-blue-700 px-5 py-2 rounded-full text-lg font-medium">
             총 {members.length}명
           </span>
@@ -604,7 +626,7 @@ function MemberManagement({
             </div>
           </div>
           <div className="max-h-96 overflow-auto">
-            {sortedMembers.map((member) => (
+            {filteredAndSortedMembers.map((member) => (
               <div
                 key={member.id}
                 className="flex items-center justify-between p-4 border-b last:border-b-0"
@@ -652,13 +674,15 @@ function MemberManagement({
                 </div>
               </div>
             ))}
-            {sortedMembers.length === 0 && (
+            {filteredAndSortedMembers.length === 0 && (
               <div
                 className="text-center py-12"
                 style={{ color: "var(--notion-text-light)" }}
               >
-                <div className="text-4xl mb-2">👤</div>
-                <div>등록된 회원이 없습니다</div>
+                <div className="text-4xl mb-2">🤷‍♂️</div>
+                <div>
+                  {searchQuery ? `"${searchQuery}"에 해당하는 회원이 없습니다` : '등록된 회원이 없습니다'}
+                </div>
               </div>
             )}
           </div>

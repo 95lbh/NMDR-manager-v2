@@ -1291,7 +1291,7 @@ export default function GamePage() {
               setEditingTeam(null);
             }} />
             <div className="notion-card relative w-full max-w-7xl max-h-[90vh] overflow-hidden" style={{boxShadow: 'var(--notion-shadow-hover)'}}>
-              <div className="flex items-center justify-between p-4 border-b bg-gradient-to-r from-blue-50 to-indigo-50">
+              <div className="flex items-center justify-between p-2 border-b bg-gradient-to-r from-blue-50 to-indigo-50">
                 <div>
                   <h3 className="text-xl font-bold" style={{color: 'var(--notion-text)'}}>
                     🏸 {editingTeam ? '팀 수정' : '플레이어 선택'} ({selectedPlayers.length}/4)
@@ -1300,22 +1300,22 @@ export default function GamePage() {
                     {editingTeam ? '팀 구성을 수정하세요' : '4명을 선택하여 팀을 만드세요'}
                   </p>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-3">
                   <button
                     onClick={autoMatchMale}
-                    className="notion-btn notion-btn-primary px-3 py-2 text-xs font-medium"
+                    className="notion-btn notion-btn-primary px-4 py-3 text-sm font-semibold"
                   >
                     🎯 자동 매칭-남복
                   </button>
                   <button
                     onClick={autoMatchFemale}
-                    className="notion-btn notion-btn-primary px-3 py-2 text-xs font-medium"
+                    className="notion-btn notion-btn-primary px-4 py-3 text-sm font-semibold"
                   >
                     🎯 자동 매칭-여복
                   </button>
                   <button
                     onClick={autoMatchMixed}
-                    className="notion-btn notion-btn-primary px-3 py-2 text-xs font-medium"
+                    className="notion-btn notion-btn-primary px-4 py-3 text-sm font-semibold"
                   >
                     🎯 자동 매칭-혼복
                   </button>
