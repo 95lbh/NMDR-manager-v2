@@ -254,11 +254,11 @@ export default function AttendancePage() {
             {/* 좌측: 미출석 회원 (2/3 비율) */}
             <div className="flex-[2]">
               <div className="mb-4">
-                <div className="flex items-center justify-between mb-3">
-                  <div className="flex items-center gap-3">
+                <div className="flex items-center justify-between mb-1">
+                  <div className="flex items-center gap-2">
                     <h2 className="text-lg font-semibold" style={{color: 'var(--notion-text)'}}>미출석 회원</h2>
-                    <div className="flex items-center gap-2">
-                      <div className="w-2 h-2 bg-gray-400 rounded-full"></div>
+                    <div className="flex items-center gap-1">
+                      <div className="w-3 h-3 bg-gray-400 rounded-full"></div>
                       <span className="bg-gray-100 text-gray-700 px-3 py-1 rounded-full text-sm font-medium">
                         {members.filter(m => !todayParticipants.some((tp): tp is Extract<AttendanceParticipant, {type:'member'}> => tp.type==='member' && tp.memberId === m.id)).length}명
                       </span>
@@ -271,7 +271,7 @@ export default function AttendancePage() {
                       placeholder="이름 검색..."
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
-                      className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      className="px-7 py-3 border-3 border-yellow-600 rounded-lg text-m focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                       style={{minWidth: '200px'}}
                     />
                     {searchQuery && (
