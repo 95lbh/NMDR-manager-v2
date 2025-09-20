@@ -144,7 +144,7 @@ export default function SettingsPage() {
 
   return (
     <main
-      className="min-h-screen p-4"
+      className="min-h-screen p-2 sm:p-4 lg:p-8"
       style={{ backgroundColor: "var(--notion-bg-secondary)" }}
     >
       <div className="max-w-6xl mx-auto">

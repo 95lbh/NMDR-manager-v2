@@ -1072,7 +1072,7 @@ export default function GamePage() {
 
   return (
     <main
-      className="min-h-screen p-4"
+      className="min-h-screen p-2 sm:p-4 lg:p-8"
       style={{ backgroundColor: "var(--notion-bg-secondary)" }}
     >
       <div className="max-w-7xl mx-auto">
@@ -1164,7 +1164,7 @@ export default function GamePage() {
           ) : null;
         })()}
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 sm:gap-4 lg:gap-6">
           {/* 왼쪽: 코트 현황 */}
           <div className="lg:col-span-2">
             <section>
@@ -1551,7 +1551,7 @@ export default function GamePage() {
 
         {/* 플레이어 선택 모달 */}
         {showPlayerModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4">
             <div
               className="absolute inset-0 bg-black/40"
               onClick={() => {
@@ -1564,7 +1564,7 @@ export default function GamePage() {
               className="notion-card relative w-full max-w-7xl max-h-[90vh] overflow-hidden"
               style={{ boxShadow: "var(--notion-shadow-hover)" }}
             >
-              <div className="flex items-center justify-between p-2 border-b bg-gradient-to-r from-blue-50 to-indigo-50">
+              <div className="flex items-center justify-between p-3 sm:p-4 border-b bg-gradient-to-r from-blue-50 to-indigo-50">
                 <div>
                   <h3
                     className="text-xl font-bold"
@@ -1579,22 +1579,22 @@ export default function GamePage() {
                       : "4명을 선택하여 팀을 만드세요"}
                   </p>
                 </div>
-                <div className="flex items-center gap-3">
+                <div className="flex flex-col sm:flex-row items-center gap-2 sm:gap-3">
                   <button
                     onClick={autoMatchMale}
-                    className="notion-btn notion-btn-primary px-4 py-3 text-sm font-semibold"
+                    className="notion-btn notion-btn-primary px-3 py-2 sm:px-4 sm:py-3 text-xs sm:text-sm font-semibold w-full sm:w-auto"
                   >
                     🎯 자동 매칭-남복
                   </button>
                   <button
                     onClick={autoMatchFemale}
-                    className="notion-btn notion-btn-primary px-4 py-3 text-sm font-semibold"
+                    className="notion-btn notion-btn-primary px-3 py-2 sm:px-4 sm:py-3 text-xs sm:text-sm font-semibold w-full sm:w-auto"
                   >
                     🎯 자동 매칭-여복
                   </button>
                   <button
                     onClick={autoMatchMixed}
-                    className="notion-btn notion-btn-primary px-4 py-3 text-sm font-semibold"
+                    className="notion-btn notion-btn-primary px-3 py-2 sm:px-4 sm:py-3 text-xs sm:text-sm font-semibold w-full sm:w-auto"
                   >
                     🎯 자동 매칭-혼복
                   </button>
@@ -1633,7 +1633,7 @@ export default function GamePage() {
                         <div className="w-4 h-4 rounded-full bg-blue-500 mr-2"></div>
                         <h3 className="text-sm font-bold text-blue-700">남</h3>
                       </div>
-                      <div className="grid grid-cols-3 gap-3">
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 sm:gap-3">
                         {getSortedPlayers()
                           .filter((player) => player.gender === "M")
                           .map((player) => {
@@ -1764,7 +1764,7 @@ export default function GamePage() {
                         <div className="w-4 h-4 rounded-full bg-pink-500 mr-2"></div>
                         <h3 className="text-sm font-bold text-pink-700">여</h3>
                       </div>
-                      <div className="grid grid-cols-3 gap-3">
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 sm:gap-3">
                         {getSortedPlayers()
                           .filter((player) => player.gender === "F")
                           .map((player) => {
@@ -1894,12 +1894,12 @@ export default function GamePage() {
 
         {/* 팀 생성/수정 버튼 (모달 바깥) */}
         {showPlayerModal && selectedPlayers.length === 4 && (
-          <div className="fixed bottom-8 left-1/2 transform -translate-x-1/2 z-[60]">
+          <div className="fixed bottom-4 sm:bottom-8 left-1/2 transform -translate-x-1/2 z-[60] px-4 w-full max-w-sm sm:max-w-none sm:w-auto">
             <button
               onClick={
                 editingTeam ? updateTeamAndCloseModal : createTeamAndCloseModal
               }
-              className="bg-blue-500 hover:bg-blue-600 text-white font-bold py-8 px-24 rounded-3xl shadow-2xl hover:shadow-3xl transition-all duration-300 text-3xl"
+              className="bg-blue-500 hover:bg-blue-600 text-white font-bold py-4 px-8 sm:py-8 sm:px-24 rounded-2xl sm:rounded-3xl shadow-2xl hover:shadow-3xl transition-all duration-300 text-xl sm:text-3xl w-full sm:w-auto"
               style={{
                 background: editingTeam
                   ? "linear-gradient(135deg, #10b981 0%, #059669 100%)"

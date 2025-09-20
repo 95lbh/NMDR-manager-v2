@@ -223,21 +223,21 @@ export default function AttendancePage() {
 
   return (
     <>
-      <main className="min-h-screen p-8" style={{backgroundColor: 'var(--notion-bg-secondary)'}}>
+      <main className="min-h-screen p-2 sm:p-4 lg:p-8" style={{backgroundColor: 'var(--notion-bg-secondary)'}}>
         <div className="max-w-7xl mx-auto">
         {/* 헤더 */}
-        <div className="flex items-center justify-between mb-6 pb-4 border-b-2 border-black">
-          <h1 className="text-2xl font-bold" style={{color: 'var(--notion-text)'}}>출석부</h1>
-          <div className="flex gap-3">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-4 sm:mb-6 pb-4 border-b-2 border-black gap-3 sm:gap-0">
+          <h1 className="text-xl sm:text-2xl font-bold" style={{color: 'var(--notion-text)'}}>출석부</h1>
+          <div className="flex flex-col sm:flex-row gap-2 sm:gap-3 w-full sm:w-auto">
             <button
               onClick={()=>setShowMemberModal(true)}
-              className="px-4 py-2 border-2 border-green-500 text-green-600 font-medium rounded hover:bg-green-50"
+              className="px-3 py-2 sm:px-4 sm:py-2 border-2 border-green-500 text-green-600 font-medium rounded hover:bg-green-50 text-sm sm:text-base w-full sm:w-auto"
             >
               + 회원추가
             </button>
             <button
               onClick={()=>setShowGuestModal(true)}
-              className="px-4 py-2 border-2 border-blue-500 text-blue-600 font-medium rounded hover:bg-blue-50"
+              className="px-3 py-2 sm:px-4 sm:py-2 border-2 border-blue-500 text-blue-600 font-medium rounded hover:bg-blue-50 text-sm sm:text-base w-full sm:w-auto"
             >
               + 게스트추가
             </button>
@@ -250,29 +250,29 @@ export default function AttendancePage() {
             <span style={{color: 'var(--notion-text-light)'}}>불러오는 중...</span>
           </div>
         ) : (
-          <div className="flex gap-6 h-full">
+          <div className="flex flex-col lg:flex-row gap-3 sm:gap-4 lg:gap-6 h-full">
             {/* 좌측: 미출석 회원 (2/3 비율) */}
-            <div className="flex-[2]">
+            <div className="flex-1 lg:flex-[2]">
               <div className="mb-4">
-                <div className="flex items-center justify-between mb-1">
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-3 gap-3 sm:gap-0">
                   <div className="flex items-center gap-2">
-                    <h2 className="text-lg font-semibold" style={{color: 'var(--notion-text)'}}>미출석 회원</h2>
+                    <h2 className="text-base sm:text-lg font-semibold" style={{color: 'var(--notion-text)'}}>미출석 회원</h2>
                     <div className="flex items-center gap-1">
                       <div className="w-3 h-3 bg-gray-400 rounded-full"></div>
-                      <span className="bg-gray-100 text-gray-700 px-3 py-1 rounded-full text-sm font-medium">
+                      <span className="bg-gray-100 text-gray-700 px-2 py-1 rounded-full text-xs sm:text-sm font-medium">
                         {members.filter(m => !todayParticipants.some((tp): tp is Extract<AttendanceParticipant, {type:'member'}> => tp.type==='member' && tp.memberId === m.id)).length}명
                       </span>
                     </div>
                   </div>
                   {/* 검색 입력 필드 */}
-                  <div className="relative">
+                  <div className="relative w-full sm:w-auto">
                     <input
                       type="text"
                       placeholder="이름 검색..."
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
-                      className="px-7 py-3 border-3 border-yellow-600 rounded-lg text-m focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                      style={{minWidth: '200px'}}
+                      className="px-3 py-2 sm:px-4 sm:py-3 border-2 border-yellow-600 rounded-lg text-sm sm:text-base focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent w-full sm:w-auto"
+                      style={{minWidth: '0'}}
                     />
                     {searchQuery && (
                       <button
@@ -426,7 +426,7 @@ export default function AttendancePage() {
                           <div className={`px-2 py-1 rounded text-xs font-medium ${
                             member?.gender === 'M' ? 'bg-blue-100 text-blue-700' : 'bg-red-100 text-red-700'
                           }`}>
-                            {member?.gender === 'M' ? '남성' : '여성'}
+                            {member?.gender === 'M' ? '남' : '여'}
                           </div>
                           <span className="text-xs opacity-0 group-hover:opacity-100 transition-opacity text-red-500">
                             ✕
