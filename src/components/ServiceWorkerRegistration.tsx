@@ -48,7 +48,8 @@ export default function ServiceWorkerRegistration() {
           // 백그라운드 동기화 등록 (지원되는 경우)
           if ('sync' in window.ServiceWorkerRegistration.prototype) {
             try {
-              await registration.sync.register('background-sync');
+              // TypeScript 타입 오류 회피를 위한 타입 단언
+              await (registration as ServiceWorkerRegistration & { sync: { register: (tag: string) => Promise<void> } }).sync.register('background-sync');
               console.log('백그라운드 동기화 등록됨');
             } catch (error) {
               console.log('백그라운드 동기화 등록 실패:', error);

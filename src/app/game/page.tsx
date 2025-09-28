@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import {
   getAppSettings,
   listMembers,
@@ -45,25 +45,9 @@ interface Court {
   duration?: number; // 분 단위
 }
 
-interface SerializedCourt {
-  id: number;
-  status: "idle" | "playing" | "finished";
-  team?: Team;
-  startedAt?: string;
-  duration?: number;
-}
 
-interface SerializedTeam {
-  id: string;
-  players: Player[];
-  createdAt: string;
-}
 
-interface GameState {
-  date: string; // YYYY-MM-DD 형식
-  courts: SerializedCourt[];
-  teams: SerializedTeam[];
-}
+
 
 export default function GamePage() {
   const { showAlert } = useAlert();
@@ -71,7 +55,6 @@ export default function GamePage() {
     gameState: savedGameState,
     syncStatus,
     saveGameState: saveLocalGameState,
-    loadGameState: loadLocalGameState,
     syncWithServer,
     resolveConflict,
   } = useGameState();
@@ -182,7 +165,7 @@ export default function GamePage() {
   };
 
   // 게임 상태를 Supabase에 저장
-  const saveCurrentGameState = async () => {
+  const saveCurrentGameState = useCallback(async () => {
     try {
       // 팀 데이터를 GameTeam 형식으로 변환
       const gameTeams = teams.map((team) => ({
@@ -221,7 +204,7 @@ export default function GamePage() {
     } catch (error) {
       console.error("게임 상태 저장 실패:", error);
     }
-  };
+  }, [teams, courts]);
 
   // 게임 상태를 Supabase에서 불러오기
   const loadGameStateFromDB = async () => {
@@ -443,7 +426,7 @@ export default function GamePage() {
 
       return () => clearTimeout(timeoutId);
     }
-  }, [courts, teams, loading, availablePlayers, saveLocalGameState]);
+  }, [courts, teams, loading, availablePlayers, saveLocalGameState, saveCurrentGameState]);
 
   // 저장된 게임 상태 복원 (초기 로드 시에만)
   const [hasInitiallyLoaded, setHasInitiallyLoaded] = useState(false);

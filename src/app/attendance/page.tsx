@@ -6,8 +6,8 @@ import type { Gender, Skill, Member, AttendanceParticipant } from '@/types/db';
 import { useAlert } from '@/components/CustomAlert';
 import { usePreventDuplicate } from '@/hooks/useGameState';
 import ConfirmModal from '@/components/ConfirmModal';
-import OnlineStatusIndicator from '@/components/OnlineStatusIndicator';
-import OfflineStorage from '@/lib/offline-storage';
+// import OnlineStatusIndicator from '@/components/OnlineStatusIndicator';
+// import OfflineStorage from '@/lib/offline-storage';
 const SKILLS: Skill[] = ['S','A','B','C','D','E','F'];
 
 // 초성 계산 유틸
@@ -62,10 +62,10 @@ export default function AttendancePage() {
   const [error, setError] = useState<string | null>(null);
   const [todayParticipants, setTodayParticipants] = useState<AttendanceParticipant[]>([]);
 
-  // 오프라인 상태 관리
-  const [isOnline, setIsOnline] = useState(true);
-  const [pendingSyncCount, setPendingSyncCount] = useState(0);
-  const offlineStorage = OfflineStorage.getInstance();
+  // 오프라인 상태 관리 (현재 미사용이지만 향후 확장을 위해 주석 처리)
+  // const [isOnline, setIsOnline] = useState(true);
+  // const [pendingSyncCount, setPendingSyncCount] = useState(0);
+  // const offlineStorage = typeof window !== 'undefined' ? OfflineStorage.getInstance() : null;
 
   // 모달 상태
   const [showMemberModal, setShowMemberModal] = useState(false);
@@ -250,12 +250,12 @@ export default function AttendancePage() {
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-4 sm:mb-6 pb-4 border-b-2 border-black gap-3 sm:gap-0">
           <div className="flex items-center gap-4">
             <h1 className="text-xl sm:text-2xl font-bold" style={{color: 'var(--notion-text)'}}>출석부</h1>
-            {/* 온라인 상태 표시기 */}
-            <OnlineStatusIndicator
+            {/* 온라인 상태 표시기 (현재 미사용) */}
+            {/* <OnlineStatusIndicator
               isOnline={isOnline}
               pendingSyncCount={pendingSyncCount}
               className="hidden sm:block"
-            />
+            /> */}
           </div>
           <div className="flex flex-col sm:flex-row gap-2 sm:gap-3 w-full sm:w-auto">
             <button

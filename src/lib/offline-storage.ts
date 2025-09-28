@@ -1,6 +1,30 @@
 'use client';
 
-import { Court, Team, Player } from '@/types';
+import { Skill, Gender } from '@/types/db';
+
+// 타입 정의 (game/page.tsx와 동일)
+interface Player {
+  id: string;
+  name: string;
+  skill: Skill;
+  gender: Gender;
+  gamesPlayedToday: number;
+  isGuest: boolean;
+}
+
+interface Team {
+  id: string;
+  players: Player[];
+  createdAt: Date;
+}
+
+interface Court {
+  id: number;
+  status: "idle" | "playing" | "finished";
+  team?: Team;
+  startedAt?: Date;
+  duration?: number; // 분 단위
+}
 
 // 오프라인 저장소 인터페이스
 interface OfflineGameState {
@@ -16,7 +40,7 @@ interface SyncQueueItem {
   id: string;
   type: 'courts' | 'teams' | 'players';
   action: 'create' | 'update' | 'delete';
-  data: any;
+  data: unknown;
   timestamp: number;
   retryCount: number;
 }
@@ -105,7 +129,7 @@ class OfflineStorage {
   }
 
   // 동기화 큐에 추가
-  private queueForSync(type: SyncQueueItem['type'], action: SyncQueueItem['action'], data: any) {
+  private queueForSync(type: SyncQueueItem['type'], action: SyncQueueItem['action'], data: unknown) {
     const item: SyncQueueItem = {
       id: `${type}_${action}_${Date.now()}`,
       type,

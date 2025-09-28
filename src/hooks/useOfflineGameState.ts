@@ -1,8 +1,32 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { Court, Team, Player } from '@/types';
+import { Skill, Gender } from '@/types/db';
 import OfflineStorage from '@/lib/offline-storage';
+
+// 타입 정의 (game/page.tsx와 동일)
+interface Player {
+  id: string;
+  name: string;
+  skill: Skill;
+  gender: Gender;
+  gamesPlayedToday: number;
+  isGuest: boolean;
+}
+
+interface Team {
+  id: string;
+  players: Player[];
+  createdAt: Date;
+}
+
+interface Court {
+  id: number;
+  status: "idle" | "playing" | "finished";
+  team?: Team;
+  startedAt?: Date;
+  duration?: number; // 분 단위
+}
 
 interface UseOfflineGameStateReturn {
   courts: Court[];
@@ -63,7 +87,7 @@ export function useOfflineGameState(): UseOfflineGameStateReturn {
     };
 
     loadInitialData();
-  }, []);
+  }, [offlineStorage]);
 
   // 온라인 상태 모니터링
   useEffect(() => {
