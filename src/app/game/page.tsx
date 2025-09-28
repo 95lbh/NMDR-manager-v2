@@ -15,10 +15,13 @@ import type { AppSettings } from "@/types/settings";
 import type { Skill, Gender } from "@/types/db";
 import { useAlert } from "@/components/CustomAlert";
 import { useGameState, usePreventDuplicate } from "@/hooks/useGameState";
+import { useOfflineGameState } from "@/hooks/useOfflineGameState";
 import {
   ConflictResolver,
   SyncStatusIndicator,
 } from "@/components/ConflictResolver";
+import OnlineStatusIndicator from "@/components/OnlineStatusIndicator";
+import ConfirmModal from "@/components/ConfirmModal";
 interface Player {
   id: string;
   name: string;
@@ -74,6 +77,16 @@ export default function GamePage() {
   } = useGameState();
   const { executeOnce } = usePreventDuplicate();
 
+  // 오프라인 최적화 상태 관리
+  const {
+    isOnline,
+    pendingSyncCount,
+    updateCourtsInstant,
+    updateTeamsInstant,
+    updateGameStateInstant,
+    forceSync
+  } = useOfflineGameState();
+
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [courts, setCourts] = useState<Court[]>([]);
   const [teams, setTeams] = useState<Team[]>([]);
@@ -99,6 +112,10 @@ export default function GamePage() {
   const [showPlayerStateModal, setShowPlayerStateModal] = useState(false);
   const [selectedPlayerForState, setSelectedPlayerForState] =
     useState<Player | null>(null);
+
+  // 게임 취소 확인 모달
+  const [showCancelConfirm, setShowCancelConfirm] = useState(false);
+  const [cancelCourtId, setCancelCourtId] = useState<number | null>(null);
 
   // 플레이어 통계 새로고침
   const refreshPlayerStats = async () => {
@@ -573,10 +590,14 @@ export default function GamePage() {
           ? { ...team, players: selectedPlayers }
           : team
       );
+      // 오프라인 최적화: 즉시 UI 업데이트
       setTeams(updatedTeams);
       setSelectedPlayers([]);
       setShowPlayerModal(false);
       setEditingTeam(null);
+
+      // 백그라운드에서 오프라인 저장 및 동기화
+      updateTeamsInstant(updatedTeams);
 
       // Supabase에 수정된 팀 상태 저장
       try {
@@ -623,13 +644,15 @@ export default function GamePage() {
   // 팀 삭제
   const deleteTeam = async (teamId: string) => {
     const updatedTeams = teams.filter((t) => t.id !== teamId);
+
+    // 오프라인 최적화: 즉시 UI 업데이트
     setTeams(updatedTeams);
     if (selectedTeam?.id === teamId) {
       setSelectedTeam(null);
     }
 
-    // 팀 삭제 후 즉시 게임 상태 저장 (복원 방지)
-    saveLocalGameState(courts, updatedTeams, availablePlayers);
+    // 백그라운드에서 오프라인 저장 및 동기화
+    updateTeamsInstant(updatedTeams);
 
     // Supabase에도 업데이트된 상태 저장
     try {
@@ -694,9 +717,13 @@ export default function GamePage() {
     );
     const updatedTeams = teams.filter((t) => t.id !== team.id);
 
+    // 오프라인 최적화: 즉시 UI 업데이트
     setCourts(updatedCourts);
     setTeams(updatedTeams);
     setSelectedTeam(null);
+
+    // 백그라운드에서 오프라인 저장 및 동기화
+    updateGameStateInstant(updatedCourts, updatedTeams, availablePlayers);
 
     // Supabase에 업데이트된 상태 저장
     try {
@@ -793,10 +820,11 @@ export default function GamePage() {
         : court
     );
 
+    // 오프라인 최적화: 즉시 UI 업데이트
     setCourts(updatedCourts);
 
-    // 게임 종료 후 즉시 상태 저장
-    saveLocalGameState(updatedCourts, teams, availablePlayers);
+    // 백그라운드에서 오프라인 저장 및 동기화
+    updateCourtsInstant(updatedCourts);
 
     // Supabase에도 업데이트된 코트 상태 저장
     try {
@@ -835,6 +863,103 @@ export default function GamePage() {
     } catch (error) {
       console.error("게임 종료 후 Supabase 상태 저장 실패:", error);
     }
+  };
+
+  // 게임 취소 (게임 횟수에 카운트되지 않음)
+  const cancelGame = async (courtId: number) => {
+    // 중복 클릭 방지
+    if (finishingGames.has(courtId)) return;
+
+    setFinishingGames((prev) => new Set(prev).add(courtId));
+
+    try {
+      const court = courts.find((c) => c.id === courtId);
+      if (!court || !court.team) return;
+
+      // 코트 상태만 초기화 (게임 통계 업데이트 없음)
+      const updatedCourts = courts.map((court) =>
+        court.id === courtId
+          ? {
+              ...court,
+              status: "idle" as const,
+              team: undefined,
+              startedAt: undefined,
+            }
+          : court
+      );
+
+      // 오프라인 최적화: 즉시 UI 업데이트
+      setCourts(updatedCourts);
+
+      // 백그라운드에서 오프라인 저장 및 동기화
+      updateCourtsInstant(updatedCourts);
+
+      // Supabase에도 업데이트된 코트 상태 저장 (게임 통계 업데이트 없이)
+      try {
+        const gameTeams = teams.map((team) => ({
+          id: team.id,
+          players: team.players.map((player) => ({
+            id: player.id,
+            name: player.name,
+            skill: player.skill,
+            gender: player.gender,
+            isGuest: player.isGuest,
+          })),
+        }));
+
+        const gameCourts = updatedCourts.map((court) => ({
+          id: court.id,
+          status: court.status,
+          team: court.team
+            ? {
+                id: court.team.id,
+                players: court.team.players.map((player) => ({
+                  id: player.id,
+                  name: player.name,
+                  skill: player.skill,
+                  gender: player.gender,
+                  isGuest: player.isGuest,
+                })),
+              }
+            : undefined,
+          startedAt: court.startedAt ? court.startedAt.toISOString() : undefined,
+          duration: court.duration,
+        }));
+
+        await saveGameState({ teams: gameTeams, courts: gameCourts });
+        console.log("게임 취소 후 Supabase 상태 저장 완료");
+      } catch (error) {
+        console.error("게임 취소 후 Supabase 상태 저장 실패:", error);
+      }
+    } catch (error) {
+      console.error("게임 취소 실패:", error);
+      showAlert("게임 취소에 실패했습니다.", "error");
+    } finally {
+      setFinishingGames((prev) => {
+        const newSet = new Set(prev);
+        newSet.delete(courtId);
+        return newSet;
+      });
+    }
+  };
+
+  // 게임 취소 확인 모달 관련 함수들
+  const handleCancelGameClick = (courtId: number) => {
+    setCancelCourtId(courtId);
+    setShowCancelConfirm(true);
+  };
+
+  const handleCancelConfirm = () => {
+    if (cancelCourtId !== null) {
+      cancelGame(cancelCourtId);
+    }
+    setShowCancelConfirm(false);
+    setCancelCourtId(null);
+  };
+
+  const handleCancelCancel = () => {
+    setShowCancelConfirm(false);
+    setCancelCourtId(null);
   };
 
   // 플레이어 상태 관리 함수들
@@ -1008,9 +1133,14 @@ export default function GamePage() {
         createdAt: new Date(),
       };
       const updatedTeams = [...teams, newTeam];
+
+      // 오프라인 최적화: 즉시 UI 업데이트
       setTeams(updatedTeams);
       setSelectedPlayers([]);
       setShowPlayerModal(false);
+
+      // 백그라운드에서 오프라인 저장 및 동기화
+      updateTeamsInstant(updatedTeams);
 
       // Supabase에 새 팀 상태 저장
       try {
@@ -1083,6 +1213,14 @@ export default function GamePage() {
           >
             게임판
           </h1>
+
+          {/* 온라인 상태 표시기 */}
+          <OnlineStatusIndicator
+            isOnline={isOnline}
+            pendingSyncCount={pendingSyncCount}
+            onForceSync={forceSync}
+            className="ml-4"
+          />
         </div>
 
         {/* 다음 대기팀 - 컴팩트 디자인 */}
@@ -1312,13 +1450,7 @@ export default function GamePage() {
                         : ""
                     }`}
                     style={{
-                      minHeight:
-                        court.status === "playing" && court.team
-                          ? `${Math.max(
-                              90,
-                              60 + court.team.players.length * 8
-                            )}px`
-                          : "80px",
+                      minHeight: "80px",
                     }}
                   >
                     {/* 타이머 - 상단 중앙 */}
@@ -1349,22 +1481,20 @@ export default function GamePage() {
                     </div>
 
                     <div className="flex items-center justify-between mt-6">
-                      {/* 왼쪽: 코트 번호 (크게) */}
-                      <div className="flex items-center">
-                        <div
-                          className={`px-3 py-3 rounded-lg font-bold text-2xl ${
-                            court.status === "playing"
-                              ? "bg-green-500 text-white shadow-lg"
-                              : "bg-gray-100 text-gray-700 shadow-md"
-                          }`}
-                        >
-                          코트 {court.id}
-                        </div>
+                      {/* 왼쪽: 코트 번호 */}
+                      <div
+                        className={`px-2 py-1.5 sm:px-3 sm:py-2 rounded-lg font-bold text-lg sm:text-xl ${
+                          court.status === "playing"
+                            ? "bg-green-500 text-white shadow-lg"
+                            : "bg-gray-100 text-gray-700 shadow-md"
+                        }`}
+                      >
+                        코트 {court.id}
                       </div>
 
                       {/* 중앙: 플레이어 정보 */}
                       {court.status === "playing" && court.team ? (
-                        <div className="flex items-center gap-3 flex-1 justify-center">
+                        <div className="flex items-center gap-2 sm:gap-3 lg:gap-4 flex-1 justify-center px-2">
                           {court.team.players.map((player, index) => (
                             <div
                               key={player.id}
@@ -1378,24 +1508,24 @@ export default function GamePage() {
                                 }`}
                               ></div>
                               <span
-                                className="font-bold text-2xl whitespace-nowrap"
+                                className="font-bold text-base sm:text-lg lg:text-xl"
                                 style={{ color: "var(--notion-text)" }}
+                                title={player.name}
                               >
                                 {player.name}
                               </span>
                               <span className="notion-badge notion-badge-orange text-xs">
                                 {player.skill}
                               </span>
-                              {index <
-                                (court.team?.players.length || 0) - 1 && (
+                              {index < (court.team?.players.length || 0) - 1 && (
                                 <span className="text-gray-400 mx-1">|</span>
                               )}
                             </div>
                           ))}
                         </div>
                       ) : (
-                        <div className="flex-1 text-center">
-                          <span className="text-gray-500 text-2xl font-bold">
+                        <div className="flex-1 text-center px-2">
+                          <span className="text-gray-500 text-lg sm:text-xl font-bold">
                             {selectedTeam && court.status === "idle"
                               ? canTeamPlay(selectedTeam)
                                 ? "클릭하여 게임 시작"
@@ -1405,23 +1535,31 @@ export default function GamePage() {
                         </div>
                       )}
 
-                      {/* 오른쪽: 종료 버튼 */}
-                      <div className="flex items-center">
-                        {court.status === "playing" && (
+                      {/* 오른쪽: 버튼들 (세로 배치) */}
+                      {court.status === "playing" && (
+                        <div className="flex flex-col gap-1">
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
                               finishGame(court.id);
                             }}
                             disabled={finishingGames.has(court.id)}
-                            className="px-3 py-3 bg-red-500 text-white rounded-md hover:bg-red-600 font-medium text-m disabled:opacity-50 disabled:cursor-not-allowed"
+                            className="px-2 py-1 bg-red-500 text-white rounded text-xs font-medium hover:bg-red-600 disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
                           >
-                            {finishingGames.has(court.id)
-                              ? "처리 중..."
-                              : "게임 종료"}
+                            {finishingGames.has(court.id) ? "처리중" : "게임 종료"}
                           </button>
-                        )}
-                      </div>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleCancelGameClick(court.id);
+                            }}
+                            disabled={finishingGames.has(court.id)}
+                            className="px-2 py-1 bg-gray-500 text-white rounded text-xs font-medium hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
+                          >
+                            게임 취소
+                          </button>
+                        </div>
+                      )}
                     </div>
                   </div>
                 ))}
@@ -1432,17 +1570,16 @@ export default function GamePage() {
           {/* 오른쪽: 대기 팀 목록 */}
           <div className="lg:col-span-1">
             <section>
-              <div className="flex items-center justify-between mb-4">
+              <div className={`flex ${courts.length <= 3 ? 'flex-col sm:flex-row sm:items-center sm:justify-between' : 'flex-col'} mb-4 gap-3 sm:gap-4`}>
                 <h2
-                  className="text-2xl font-semibold"
+                  className="text-xl sm:text-2xl font-semibold"
                   style={{ color: "var(--notion-text)" }}
                 >
                   대기 팀 ({teams.length})
                 </h2>
                 <button
                   onClick={() => setShowPlayerModal(true)}
-                  className="notion-btn w-50 h-20 notion-btn-primary px-6 py-3 font-bold shadow-lg hover:shadow-xl transition-all duration-300 flex items-center justify-center animate-gentle-pulse"
-                  style={{ fontSize: "2rem" }}
+                  className={`notion-btn w-full ${courts.length <= 3 ? 'sm:w-auto sm:min-w-[200px]' : 'sm:w-full'} ${courts.length <= 2 ? 'h-12 sm:h-16 lg:h-20' : courts.length <= 4 ? 'h-10 sm:h-12 lg:h-16' : 'h-10 sm:h-12'} notion-btn-primary px-4 py-2 sm:px-6 sm:py-3 font-bold shadow-lg hover:shadow-xl transition-all duration-300 flex items-center justify-center animate-gentle-pulse ${courts.length <= 2 ? 'text-base sm:text-lg lg:text-2xl' : courts.length <= 4 ? 'text-sm sm:text-base lg:text-lg' : 'text-sm sm:text-base'}`}
                 >
                   팀 구성하기
                 </button>
@@ -1508,19 +1645,19 @@ export default function GamePage() {
                             return (
                               <div
                                 key={player.id}
-                                className="flex items-center gap-3 text-xs"
+                                className="flex items-center gap-1.5 sm:gap-2 lg:gap-3 text-xs"
                               >
                                 <div
-                                  className={`w-2 h-2 rounded-full ${
+                                  className={`w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full ${
                                     player.gender === "M"
                                       ? "bg-blue-500"
                                       : "bg-pink-500"
                                   }`}
                                 ></div>
-                                <span className="flex-1 truncate font-bold">
+                                <span className="flex-1 truncate font-bold text-xs sm:text-sm" title={player.name}>
                                   {player.name}
                                 </span>
-                                <span className="notion-badge notion-badge-orange text-xs">
+                                <span className="notion-badge notion-badge-orange text-xs px-1 py-0.5">
                                   {player.skill}
                                 </span>
                                 {playerStatus === "playing" && (
@@ -1551,7 +1688,7 @@ export default function GamePage() {
 
         {/* 플레이어 선택 모달 */}
         {showPlayerModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4">
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-1 sm:p-2 lg:p-4">
             <div
               className="absolute inset-0 bg-black/40"
               onClick={() => {
@@ -1561,42 +1698,45 @@ export default function GamePage() {
               }}
             />
             <div
-              className="notion-card relative w-full max-w-7xl max-h-[90vh] overflow-hidden"
+              className="notion-card relative w-full max-w-sm sm:max-w-4xl lg:max-w-7xl max-h-[95vh] sm:max-h-[90vh] overflow-hidden"
               style={{ boxShadow: "var(--notion-shadow-hover)" }}
             >
-              <div className="flex items-center justify-between p-3 sm:p-4 border-b bg-gradient-to-r from-blue-50 to-indigo-50">
-                <div>
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between p-2 sm:p-3 lg:p-4 border-b bg-gradient-to-r from-blue-50 to-indigo-50 gap-3 sm:gap-4">
+                <div className="flex-1 min-w-0">
                   <h3
-                    className="text-xl font-bold"
+                    className="text-lg sm:text-xl font-bold truncate"
                     style={{ color: "var(--notion-text)" }}
                   >
                     🏸 {editingTeam ? "팀 수정" : "플레이어 선택"} (
                     {selectedPlayers.length}/4)
                   </h3>
-                  <p className="text-sm text-gray-600 mt-1">
+                  <p className="text-xs sm:text-sm text-gray-600 mt-1 hidden sm:block">
                     {editingTeam
                       ? "팀 구성을 수정하세요"
                       : "4명을 선택하여 팀을 만드세요"}
                   </p>
                 </div>
-                <div className="flex flex-col sm:flex-row items-center gap-2 sm:gap-3">
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-1.5 sm:gap-2 lg:gap-3">
                   <button
                     onClick={autoMatchMale}
-                    className="notion-btn notion-btn-primary px-3 py-2 sm:px-4 sm:py-3 text-xs sm:text-sm font-semibold w-full sm:w-auto"
+                    className="notion-btn notion-btn-primary px-2 py-1.5 sm:px-3 sm:py-2 lg:px-4 lg:py-3 text-xs sm:text-sm font-semibold"
                   >
-                    🎯 자동 매칭-남복
+                    <span className="hidden sm:inline">🎯 자동 매칭-남복</span>
+                    <span className="sm:hidden">🎯 남복</span>
                   </button>
                   <button
                     onClick={autoMatchFemale}
-                    className="notion-btn notion-btn-primary px-3 py-2 sm:px-4 sm:py-3 text-xs sm:text-sm font-semibold w-full sm:w-auto"
+                    className="notion-btn notion-btn-primary px-2 py-1.5 sm:px-3 sm:py-2 lg:px-4 lg:py-3 text-xs sm:text-sm font-semibold"
                   >
-                    🎯 자동 매칭-여복
+                    <span className="hidden sm:inline">🎯 자동 매칭-여복</span>
+                    <span className="sm:hidden">🎯 여복</span>
                   </button>
                   <button
                     onClick={autoMatchMixed}
-                    className="notion-btn notion-btn-primary px-3 py-2 sm:px-4 sm:py-3 text-xs sm:text-sm font-semibold w-full sm:w-auto"
+                    className="notion-btn notion-btn-primary px-2 py-1.5 sm:px-3 sm:py-2 lg:px-4 lg:py-3 text-xs sm:text-sm font-semibold"
                   >
-                    🎯 자동 매칭-혼복
+                    <span className="hidden sm:inline">🎯 자동 매칭-혼복</span>
+                    <span className="sm:hidden">🎯 혼복</span>
                   </button>
                 </div>
                 <button
@@ -1605,7 +1745,7 @@ export default function GamePage() {
                     setSelectedPlayers([]);
                     setEditingTeam(null);
                   }}
-                  className="text-2xl opacity-70 hover:opacity-100 px-4 py-3 rounded-lg hover:bg-gray-100 transition-all duration-200"
+                  className="text-xl sm:text-2xl opacity-70 hover:opacity-100 px-2 py-2 sm:px-4 sm:py-3 rounded-lg hover:bg-gray-100 transition-all duration-200 self-end sm:self-auto"
                   style={{ color: "var(--notion-text-light)" }}
                 >
                   ✕
@@ -1626,14 +1766,14 @@ export default function GamePage() {
                     </div>
                   </div>
                 ) : (
-                  <div className="flex gap-4">
+                  <div className="flex flex-col sm:flex-row gap-3 sm:gap-4">
                     {/* 남자 플레이어 섹션 */}
                     <div className="flex-1">
-                      <div className="flex items-center justify-center mb-4 pb-2 border-b-2 border-blue-200">
-                        <div className="w-4 h-4 rounded-full bg-blue-500 mr-2"></div>
+                      <div className="flex items-center justify-center mb-3 sm:mb-4 pb-2 border-b-2 border-blue-200">
+                        <div className="w-3 h-3 sm:w-4 sm:h-4 rounded-full bg-blue-500 mr-2"></div>
                         <h3 className="text-sm font-bold text-blue-700">남</h3>
                       </div>
-                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 sm:gap-3">
+                      <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-3 gap-1.5 sm:gap-2 lg:gap-3">
                         {getSortedPlayers()
                           .filter((player) => player.gender === "M")
                           .map((player) => {
@@ -1671,7 +1811,7 @@ export default function GamePage() {
                                     { once: true }
                                   );
                                 }}
-                                className={`p-3 rounded-xl border-2 transition-all duration-200 min-h-[90px] ${
+                                className={`p-1.5 sm:p-2 lg:p-3 rounded-lg sm:rounded-xl border-2 transition-all duration-200 min-h-[60px] sm:min-h-[70px] lg:min-h-[90px] ${
                                   !isSelectable
                                     ? "opacity-50 cursor-not-allowed bg-gray-50 border-gray-200"
                                     : isSelected
@@ -1686,13 +1826,13 @@ export default function GamePage() {
                                 }`}
                               >
                                 {/* 1행: 중앙 상단 게임 상태 */}
-                                <div className="flex justify-center h-5 mb-1">
+                                <div className="flex justify-center h-4 sm:h-5 mb-1">
                                   {(status === "playing" ||
                                     status === "waiting" ||
                                     status === "home" ||
                                     status === "lesson") && (
                                     <span
-                                      className={`w-full text-center text-xs px-2 py-1 rounded-full font-medium ${
+                                      className={`w-full text-center text-xs px-1.5 py-0.5 sm:px-2 sm:py-1 rounded-full font-medium ${
                                         status === "playing"
                                           ? "bg-green-100 text-green-700"
                                           : status === "home"
@@ -1714,10 +1854,10 @@ export default function GamePage() {
                                 </div>
 
                                 {/* 2행: 성별 점 + 이름 + 등급 */}
-                                <div className="flex items-center justify-between mb-1 h-5">
-                                  <div className="w-4 h-4 rounded-full bg-blue-500"></div>
+                                <div className="flex items-center justify-between mb-1 h-4 sm:h-5">
+                                  <div className="w-3 h-3 sm:w-4 sm:h-4 rounded-full bg-blue-500"></div>
                                   <span
-                                    className="font-bold text-lg truncate flex-1 text-center"
+                                    className="font-bold text-xs sm:text-sm lg:text-lg truncate flex-1 text-center px-1"
                                     style={{ color: "var(--notion-text)" }}
                                     title={`${player.isGuest ? "(G) " : ""}${
                                       player.name
@@ -1727,7 +1867,7 @@ export default function GamePage() {
                                     {player.name}
                                   </span>
                                   <span
-                                    className={`px-2 py-1 rounded text-xs font-medium ${
+                                    className={`px-1 py-0.5 sm:px-1.5 sm:py-0.5 lg:px-2 lg:py-1 rounded text-xs font-medium ${
                                       player.skill === "S"
                                         ? "bg-red-100 text-red-700"
                                         : player.skill === "A"
@@ -1756,15 +1896,16 @@ export default function GamePage() {
                     </div>
 
                     {/* 구분선 */}
-                    <div className="w-px bg-gray-300"></div>
+                    <div className="w-px bg-gray-300 hidden sm:block"></div>
+                    <div className="h-px bg-gray-300 sm:hidden my-3"></div>
 
                     {/* 여자 플레이어 섹션 */}
                     <div className="flex-1">
-                      <div className="flex items-center justify-center mb-4 pb-2 border-b-2 border-pink-200">
-                        <div className="w-4 h-4 rounded-full bg-pink-500 mr-2"></div>
+                      <div className="flex items-center justify-center mb-3 sm:mb-4 pb-2 border-b-2 border-pink-200">
+                        <div className="w-3 h-3 sm:w-4 sm:h-4 rounded-full bg-pink-500 mr-2"></div>
                         <h3 className="text-sm font-bold text-pink-700">여</h3>
                       </div>
-                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 sm:gap-3">
+                      <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-3 gap-1.5 sm:gap-2 lg:gap-3">
                         {getSortedPlayers()
                           .filter((player) => player.gender === "F")
                           .map((player) => {
@@ -1802,7 +1943,7 @@ export default function GamePage() {
                                     { once: true }
                                   );
                                 }}
-                                className={`p-3 rounded-xl border-2 transition-all duration-200 min-h-[90px] ${
+                                className={`p-2 sm:p-3 rounded-xl border-2 transition-all duration-200 min-h-[70px] sm:min-h-[90px] ${
                                   !isSelectable
                                     ? "opacity-50 cursor-not-allowed bg-gray-50 border-gray-200"
                                     : isSelected
@@ -1848,7 +1989,7 @@ export default function GamePage() {
                                 <div className="flex items-center justify-between mb-1 h-5">
                                   <div className="w-4 h-4 rounded-full bg-pink-500"></div>
                                   <span
-                                    className="font-bold text-lg truncate flex-1 text-center"
+                                    className="font-bold text-sm sm:text-lg truncate flex-1 text-center"
                                     style={{ color: "var(--notion-text)" }}
                                     title={`${player.isGuest ? "(G) " : ""}${
                                       player.name
@@ -1858,7 +1999,7 @@ export default function GamePage() {
                                     {player.name}
                                   </span>
                                   <span
-                                    className={`px-2 py-1 rounded text-xs font-medium ${
+                                    className={`px-1.5 py-0.5 sm:px-2 sm:py-1 rounded text-xs font-medium ${
                                       player.skill === "S"
                                         ? "bg-red-100 text-red-700"
                                         : player.skill === "A"
@@ -1894,12 +2035,12 @@ export default function GamePage() {
 
         {/* 팀 생성/수정 버튼 (모달 바깥) */}
         {showPlayerModal && selectedPlayers.length === 4 && (
-          <div className="fixed bottom-4 sm:bottom-8 left-1/2 transform -translate-x-1/2 z-[60] px-4 w-full max-w-sm sm:max-w-none sm:w-auto">
+          <div className="fixed bottom-2 sm:bottom-4 lg:bottom-8 left-1/2 transform -translate-x-1/2 z-[60] px-2 sm:px-4 w-full max-w-xs sm:max-w-sm lg:max-w-none lg:w-auto">
             <button
               onClick={
                 editingTeam ? updateTeamAndCloseModal : createTeamAndCloseModal
               }
-              className="bg-blue-500 hover:bg-blue-600 text-white font-bold py-4 px-8 sm:py-8 sm:px-24 rounded-2xl sm:rounded-3xl shadow-2xl hover:shadow-3xl transition-all duration-300 text-xl sm:text-3xl w-full sm:w-auto"
+              className="bg-blue-500 hover:bg-blue-600 text-white font-bold py-3 px-6 sm:py-4 sm:px-8 lg:py-8 lg:px-24 rounded-xl sm:rounded-2xl lg:rounded-3xl shadow-2xl hover:shadow-3xl transition-all duration-300 text-lg sm:text-xl lg:text-3xl w-full lg:w-auto"
               style={{
                 background: editingTeam
                   ? "linear-gradient(135deg, #10b981 0%, #059669 100%)"
@@ -2040,6 +2181,18 @@ export default function GamePage() {
           }}
         />
       )}
+
+      {/* 게임 취소 확인 모달 */}
+      <ConfirmModal
+        isOpen={showCancelConfirm}
+        title="게임 취소"
+        message="게임을 취소하시겠습니까? 게임 횟수에 카운트되지 않습니다."
+        confirmText="취소하기"
+        cancelText="돌아가기"
+        onConfirm={handleCancelConfirm}
+        onCancel={handleCancelCancel}
+        type="warning"
+      />
     </main>
   );
 }

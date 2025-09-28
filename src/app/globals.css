@@ -1,5 +1,11 @@
 @import "tailwindcss";
 
+/* 커스텀 브레이크포인트 */
+@media (min-width: 475px) {
+  .xs\:inline { display: inline; }
+  .xs\:hidden { display: none; }
+}
+
 /* Notion 스타일 디자인 시스템 */
 :root {
   --notion-bg: #ffffff;
@@ -379,5 +385,30 @@ body {
   /* 모달 최적화 */
   .fixed.inset-0 {
     -webkit-overflow-scrolling: touch;
+  }
+
+  /* 텍스트 잘림 방지 */
+  .truncate {
+    word-break: break-all;
+    overflow-wrap: break-word;
+  }
+
+  /* 플렉스 아이템 최소 너비 */
+  .flex-1 {
+    min-width: 0;
+  }
+
+  /* 그리드 간격 최적화 */
+  .grid {
+    gap: 0.5rem;
+  }
+
+  /* 작은 화면에서 패딩 최적화 */
+  .p-3 {
+    padding: 0.5rem;
+  }
+
+  .p-4 {
+    padding: 0.75rem;
   }
 }

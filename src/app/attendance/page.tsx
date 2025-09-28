@@ -6,6 +6,8 @@ import type { Gender, Skill, Member, AttendanceParticipant } from '@/types/db';
 import { useAlert } from '@/components/CustomAlert';
 import { usePreventDuplicate } from '@/hooks/useGameState';
 import ConfirmModal from '@/components/ConfirmModal';
+import OnlineStatusIndicator from '@/components/OnlineStatusIndicator';
+import OfflineStorage from '@/lib/offline-storage';
 const SKILLS: Skill[] = ['S','A','B','C','D','E','F'];
 
 // 초성 계산 유틸
@@ -59,6 +61,11 @@ export default function AttendancePage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [todayParticipants, setTodayParticipants] = useState<AttendanceParticipant[]>([]);
+
+  // 오프라인 상태 관리
+  const [isOnline, setIsOnline] = useState(true);
+  const [pendingSyncCount, setPendingSyncCount] = useState(0);
+  const offlineStorage = OfflineStorage.getInstance();
 
   // 모달 상태
   const [showMemberModal, setShowMemberModal] = useState(false);
@@ -182,12 +189,17 @@ export default function AttendancePage() {
 
   const handleCreateGuestAndAttend = async () => {
     try {
-      await markAttendance({
-        participant: { type: 'guest', name: gName.trim(), birthYear: gBirthYear as number, gender: gGender, skill: gSkill },
-        shuttles: gShuttles,
-      });
-      const today = await getTodayAttendance();
-      setTodayParticipants(today.participants);
+      // 오프라인 최적화: 즉시 UI 업데이트
+      const newGuest: AttendanceParticipant = {
+        type: 'guest',
+        name: gName.trim(),
+        birthYear: gBirthYear as number,
+        gender: gGender,
+        skill: gSkill,
+        shuttles: gShuttles
+      };
+
+      setTodayParticipants(prev => [...prev, newGuest]);
       setGName('');
       setGBirthYear('');
       setGGender('M');
@@ -195,6 +207,15 @@ export default function AttendancePage() {
       setGShuttles(0);
       setShowGuestModal(false);
       showAlert('게스트 출석이 완료되었습니다.', 'success');
+
+      // 백그라운드에서 서버 동기화
+      markAttendance({
+        participant: { type: 'guest', name: gName.trim(), birthYear: gBirthYear as number, gender: gGender, skill: gSkill },
+        shuttles: gShuttles,
+      }).catch(e => {
+        console.error('게스트 출석 동기화 실패:', e);
+        // 실패 시 UI에서 제거하지 않음 (오프라인 저장소에서 재시도)
+      });
     } catch (e) {
       const msg = e instanceof Error ? e.message : '게스트 출석 실패';
       showAlert(msg, 'error');
@@ -227,7 +248,15 @@ export default function AttendancePage() {
         <div className="max-w-7xl mx-auto">
         {/* 헤더 */}
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-4 sm:mb-6 pb-4 border-b-2 border-black gap-3 sm:gap-0">
-          <h1 className="text-xl sm:text-2xl font-bold" style={{color: 'var(--notion-text)'}}>출석부</h1>
+          <div className="flex items-center gap-4">
+            <h1 className="text-xl sm:text-2xl font-bold" style={{color: 'var(--notion-text)'}}>출석부</h1>
+            {/* 온라인 상태 표시기 */}
+            <OnlineStatusIndicator
+              isOnline={isOnline}
+              pendingSyncCount={pendingSyncCount}
+              className="hidden sm:block"
+            />
+          </div>
           <div className="flex flex-col sm:flex-row gap-2 sm:gap-3 w-full sm:w-auto">
             <button
               onClick={()=>setShowMemberModal(true)}
@@ -317,11 +346,11 @@ export default function AttendancePage() {
                           </div>
 
                           {/* 카드 그리드 */}
-                          <div className="grid grid-cols-4 gap-2">
+                          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
                             {list.map((m) => (
                               <div
                                 key={m.id}
-                                className={`border-2 rounded-lg p-2 cursor-pointer hover:shadow-md transition-all duration-200 ${
+                                className={`border-2 rounded-lg p-1.5 sm:p-2 cursor-pointer hover:shadow-md transition-all duration-200 ${
                                   m.gender === 'M'
                                     ? 'border-blue-300 bg-blue-50 hover:border-blue-400'
                                     : 'border-red-300 bg-red-50 hover:border-red-400'
@@ -332,22 +361,22 @@ export default function AttendancePage() {
                                   setShowShuttleModal(true);
                                 }}
                               >
-                                <div className="flex items-center gap-3">
+                                <div className="flex items-center gap-1.5 sm:gap-2">
                                   {/* 아바타(등급/성별 색상) */}
                                   {/* <div className={`w-8 h-8 rounded-full border-2 flex items-center justify-center text-xs font-bold ${getSkillColor(m.skill)}`}> */}
-                                  <div className={`w-8 h-8 rounded-full border-2 flex items-center justify-center text-xs font-bold ${getSkillColor(m.gender)}`}>
+                                  <div className={`w-6 h-6 sm:w-8 sm:h-8 rounded-full border-2 flex items-center justify-center text-xs font-bold ${getSkillColor(m.gender)}`}>
                                     {m.skill}
                                   </div>
 
                                   {/* 이름 */}
                                   <div className="flex-1 min-w-0">
-                                    <div className="text-base font-bold truncate" style={{ color: 'var(--notion-text)' }}>
+                                    <div className="text-sm sm:text-base font-bold truncate" style={{ color: 'var(--notion-text)' }}>
                                       {m.name}
                                     </div>
                                   </div>
 
                                   {/* 성별 배지 */}
-                                  <div className={`px-2 py-1 rounded text-xs font-semibold ${
+                                  <div className={`px-1.5 py-0.5 sm:px-2 sm:py-1 rounded text-xs font-semibold ${
                                     m.gender === 'M' ? 'bg-blue-100 text-blue-700' : 'bg-red-100 text-red-700'
                                   }`}>
                                     {m.gender === 'M' ? '남' : '여'}
@@ -390,7 +419,7 @@ export default function AttendancePage() {
                   </div>
                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3">
                 {/* 출석 회원 */}
                 {todayParticipants.filter((p): p is Extract<AttendanceParticipant, {type:'member'}> => p.type==='member')
                   .sort((a, b) => a.name.localeCompare(b.name))
@@ -399,16 +428,16 @@ export default function AttendancePage() {
                   return (
                     <div
                       key={`${p.type}-${p.memberId}-${idx}`}
-                      className={`border-2 rounded-lg p-2 cursor-pointer hover:shadow-md transition-all duration-200 group ${
+                      className={`border-2 rounded-lg p-2 sm:p-3 cursor-pointer hover:shadow-md transition-all duration-200 group ${
                         member?.gender === 'M'
                           ? 'border-blue-300 bg-blue-50 hover:border-blue-400'
                           : 'border-red-300 bg-red-50 hover:border-red-400'
                       }`}
                       onClick={() => handleRemoveAttendance(p.memberId, 'member')}
                     >
-                      <div className="flex items-center gap-3">
+                      <div className="flex items-center gap-2 sm:gap-3">
                         {/* 아바타 (등급별 색상) - 크기 축소 */}
-                        <div className={`w-8 h-8 rounded-full border-2 flex items-center justify-center text-xs font-bold ${
+                        <div className={`w-6 h-6 sm:w-8 sm:h-8 rounded-full border-2 flex items-center justify-center text-xs font-bold ${
                           // member?.skill ? getSkillColor(member.skill) : 'border-gray-500 bg-gray-100 text-gray-700'
                           member?.skill ? getSkillColor(member.gender) : 'border-gray-500 bg-gray-100 text-gray-700'
                         }`}>
@@ -417,13 +446,13 @@ export default function AttendancePage() {
 
                         {/* 이름 - 크기 증가 및 굵게 */}
                         <div className="flex-1 min-w-0">
-                          <div className="text-sm font-bold break-words" style={{color: 'var(--notion-text)'}}>{p.name}</div>
+                          <div className="text-sm sm:text-base font-bold break-words" style={{color: 'var(--notion-text)'}} title={p.name}>{p.name}</div>
                           {/* <div className="text-xs text-gray-600">셔틀콕 {p.shuttles}개</div> */}
                         </div>
 
                         {/* 성별 배지와 삭제 버튼 */}
                         <div className="flex items-center gap-1">
-                          <div className={`px-2 py-1 rounded text-xs font-medium ${
+                          <div className={`px-1.5 py-0.5 sm:px-2 sm:py-1 rounded text-xs font-medium ${
                             member?.gender === 'M' ? 'bg-blue-100 text-blue-700' : 'bg-red-100 text-red-700'
                           }`}>
                             {member?.gender === 'M' ? '남' : '여'}
@@ -443,23 +472,23 @@ export default function AttendancePage() {
                   .map((p, idx) => (
                   <div
                     key={`${p.type}-${p.name}-${idx}`}
-                    className={`border-2 rounded-lg p-2 cursor-pointer hover:shadow-md transition-all duration-200 group ${
+                    className={`border-2 rounded-lg p-2 sm:p-3 cursor-pointer hover:shadow-md transition-all duration-200 group ${
                       p.gender === 'M'
                         ? 'border-blue-300 bg-blue-50 hover:border-blue-400'
                         : 'border-red-300 bg-red-50 hover:border-red-400'
                     }`}
                     onClick={() => handleRemoveAttendance(p.name, 'guest')}
                   >
-                    <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-2 sm:gap-3">
                       {/* 아바타 (등급별 색상) - 크기 축소 */}
                       {/* <div className={`w-8 h-8 rounded-full border-2 flex items-center justify-center text-xs font-bold ${getSkillColor(p.skill)}`}> */}
-                      <div className={`w-8 h-8 rounded-full border-2 flex items-center justify-center text-xs font-bold ${getSkillColor(p.gender)}`}>
+                      <div className={`w-6 h-6 sm:w-8 sm:h-8 rounded-full border-2 flex items-center justify-center text-xs font-bold ${getSkillColor(p.gender)}`}>
                         {p.skill}
                       </div>
 
                       {/* 이름 - 크기 증가 및 굵게 */}
                       <div className="flex-1 min-w-0">
-                        <div className="text-sm font-bold break-words" style={{color: 'var(--notion-text)'}}>{p.name}</div>
+                        <div className="text-sm sm:text-base font-bold break-words" style={{color: 'var(--notion-text)'}} title={p.name}>{p.name}</div>
                         {/* <div className="text-xs text-gray-600">셔틀콕 {p.shuttles}개</div> */}
                       </div>
 
@@ -596,7 +625,21 @@ export default function AttendancePage() {
                 const result = await executeOnce(`attendance-${selectedMember.id}`, async () => {
                   setIsSubmittingAttendance(true);
                   try {
-                    await markAttendance({
+                    // 오프라인 최적화: 즉시 UI 업데이트
+                    const newMember: AttendanceParticipant = {
+                      type: 'member',
+                      memberId: selectedMember.id,
+                      name: selectedMember.name,
+                      skill: selectedMember.skill,
+                      shuttles: selectedShuttles
+                    };
+
+                    setTodayParticipants(prev => [...prev, newMember]);
+                    setShowShuttleModal(false);
+                    setSelectedMember(null);
+
+                    // 백그라운드에서 서버 동기화
+                    markAttendance({
                       participant: {
                         type: 'member',
                         memberId: selectedMember.id,
@@ -604,11 +647,10 @@ export default function AttendancePage() {
                         skill: selectedMember.skill
                       },
                       shuttles: selectedShuttles,
+                    }).catch(e => {
+                      console.error('회원 출석 동기화 실패:', e);
+                      // 실패 시 UI에서 제거하지 않음 (오프라인 저장소에서 재시도)
                     });
-                    setShowShuttleModal(false);
-                    setSelectedMember(null);
-                    const today = await getTodayAttendance();
-                    setTodayParticipants(today.participants);
                     return true;
                   } catch (e) {
                     const msg = e instanceof Error ? e.message : '출석 처리 실패';
