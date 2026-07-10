@@ -507,28 +507,37 @@ export async function saveAppSettings(settings: AppSettings): Promise<void> {
 
 // ===== 통계 관련 함수들 =====
 
-export async function getTotalGamesCount(): Promise<number> {
-  const { data, error } = await supabase
-    .from('game_stats')
-    .select('games_played_today');
-
-  if (error) {
-    throw new Error(`총 게임 수 조회 실패: ${error.message}`);
+// 특정 컬럼의 합계를 구한다.
+// Supabase aggregate가 활성이면 1행만 전송하고, 미지원(프로젝트 설정 비활성)이면
+// 전체 행을 받아 JS로 합산하는 방식으로 자동 폴백한다.
+async function sumColumn(table: string, column: string): Promise<number> {
+  // 1) DB 집계 시도 (활성 시 한 행만 전송)
+  const agg = await supabase
+    .from(table)
+    .select(`total:${column}.sum()`)
+    .single();
+  const aggData = agg.data as { total: number | null } | null;
+  if (!agg.error && aggData && aggData.total !== undefined) {
+    return aggData.total ?? 0;
   }
 
-  return data.reduce((total, stats) => total + stats.games_played_today, 0);
+  // 2) 폴백: 전체 컬럼 조회 후 JS 합산 (aggregate 미지원 프로젝트)
+  const { data, error } = await supabase.from(table).select(column);
+  if (error) {
+    throw new Error(`합계 조회 실패 (${table}.${column}): ${error.message}`);
+  }
+  return ((data ?? []) as unknown as Array<Record<string, number>>).reduce(
+    (sum, row) => sum + (Number(row[column]) || 0),
+    0
+  );
+}
+
+export async function getTotalGamesCount(): Promise<number> {
+  return sumColumn("game_stats", "games_played_today");
 }
 
 export async function getTotalShuttlesCount(): Promise<number> {
-  const { data, error } = await supabase
-    .from('attendance_participants')
-    .select('shuttles');
-
-  if (error) {
-    throw new Error(`총 셔틀콕 수 조회 실패: ${error.message}`);
-  }
-
-  return data.reduce((total, participant) => total + participant.shuttles, 0);
+  return sumColumn("attendance_participants", "shuttles");
 }
 
 export async function resetStatisticsData(): Promise<void> {

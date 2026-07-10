@@ -92,6 +92,38 @@ export default function AttendancePage() {
 
   // 검색 상태
   const [searchQuery, setSearchQuery] = useState('');
+
+  // 미출석 회원 목록 계산 메모이제이션 (검색 입력마다 전체 필터+한글정렬+초성그룹 재계산 방지)
+  const attendedMemberIds = useMemo(
+    () =>
+      new Set(
+        todayParticipants
+          .filter(
+            (p): p is Extract<AttendanceParticipant, { type: 'member' }> =>
+              p.type === 'member'
+          )
+          .map((p) => p.memberId)
+      ),
+    [todayParticipants]
+  );
+
+  const notAttendedCount = useMemo(
+    () => members.filter((m) => !attendedMemberIds.has(m.id)).length,
+    [members, attendedMemberIds]
+  );
+
+  const notAttendedGroups = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    const filtered = members
+      .filter((m) => !attendedMemberIds.has(m.id))
+      .filter((m) => q === '' || m.name.toLowerCase().includes(q))
+      .sort((a, b) => a.name.localeCompare(b.name, 'ko'));
+    return filtered.reduce((acc: Record<string, Member[]>, m) => {
+      const key = getInitialConsonant(m.name);
+      (acc[key] ||= []).push(m);
+      return acc;
+    }, {});
+  }, [members, attendedMemberIds, searchQuery]);
   const [gSkill, setGSkill] = useState<Skill>('C');
   const [gShuttles, setGShuttles] = useState(0);
 
@@ -291,7 +323,7 @@ export default function AttendancePage() {
                     <div className="flex items-center gap-1">
                       <div className="w-3 h-3 bg-gray-400 rounded-full"></div>
                       <span className="bg-gray-100 text-gray-700 px-2 py-1 rounded-full text-xs sm:text-sm font-medium">
-                        {members.filter(m => !todayParticipants.some((tp): tp is Extract<AttendanceParticipant, {type:'member'}> => tp.type==='member' && tp.memberId === m.id)).length}명
+                        {notAttendedCount}명
                       </span>
                     </div>
                   </div>
@@ -316,27 +348,9 @@ export default function AttendancePage() {
                   </div>
                 </div>
               </div>
-              {(() => {
-                // 필터 + 검색 + 정렬(이름 가나다순)
-                const filteredMembers = members
-                  .filter(m => !todayParticipants.some(
-                    (tp): tp is Extract<AttendanceParticipant, {type:'member'}> =>
-                      tp.type === 'member' && tp.memberId === m.id
-                  ))
-                  .filter(m => searchQuery === '' || m.name.toLowerCase().includes(searchQuery.toLowerCase()))
-                  .sort((a, b) => a.name.localeCompare(b.name, 'ko'));
-
-                // 초성별 그룹화
-                const groups = filteredMembers.reduce((acc: Record<string, typeof members>, m) => {
-                  const key = getInitialConsonant(m.name);
-                  (acc[key] ||= []).push(m);
-                  return acc;
-                }, {});
-
-                return (
-                  <div className="space-y-1">
+              <div className="space-y-1">
                     {GROUP_ORDER.map((key) => {
-                      const list = groups[key];
+                      const list = notAttendedGroups[key];
                       if (!list || list.length === 0) return null;
 
                       return (
@@ -391,8 +405,6 @@ export default function AttendancePage() {
                       );
                     })}
                   </div>
-                );
-              })()}
             </div>
 
             {/* 중앙 구분선 */}
