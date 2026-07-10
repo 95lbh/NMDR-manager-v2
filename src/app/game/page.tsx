@@ -271,15 +271,19 @@ export default function GamePage() {
     (async () => {
       try {
         setLoading(true);
-        const appSettings = await getAppSettings();
-        setSettings(appSettings);
 
-        // 출석 플레이어 + 통계 배치 로드 (플레이어별 N+1 순차 조회 제거)
-        const players = await loadPlayersWithStats();
+        // 서로 독립적인 초기 로드를 병렬 실행 (순차 waterfall 제거 → 왕복 절반으로 단축)
+        // - getAppSettings: 코트 설정
+        // - loadPlayersWithStats: 출석 플레이어 + 통계(배치)
+        // - loadGameStateFromDB: 저장된 게임판 복원 (반환값으로 중복 조회 제거)
+        const [appSettings, players, hadState] = await Promise.all([
+          getAppSettings(),
+          loadPlayersWithStats(),
+          loadGameStateFromDB(),
+        ]);
+        setSettings(appSettings);
         setAvailablePlayers(players);
 
-        // 저장된 게임 상태 복원 (반환값으로 중복 loadGameState 조회 제거)
-        const hadState = await loadGameStateFromDB();
         if (!hadState) {
           // 저장된 게임 상태가 없으면 초기 코트 상태 생성
           const initialCourts: Court[] = Array.from(
@@ -822,14 +826,14 @@ export default function GamePage() {
                 <button
                   onClick={async () => {
                     try {
-                      // DB에서 최신 설정 + 플레이어 통계 + 게임 상태를 동기화 (배치)
+                      // DB에서 최신 설정 + 플레이어 통계 + 게임 상태를 병렬 동기화
                       const [appSettings, players] = await Promise.all([
                         getAppSettings(),
                         loadPlayersWithStats(),
+                        loadGameStateFromDB(),
                       ]);
                       setSettings(appSettings);
                       setAvailablePlayers(players);
-                      await loadGameStateFromDB();
                     } catch (error) {
                       console.error("동기화 실패:", error);
                       showAlert(
