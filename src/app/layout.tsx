@@ -131,8 +131,8 @@ export default function RootLayout({
           {/* Service Worker 등록 */}
           <ServiceWorkerRegistration />
 
-          {/* Supabase 디버그 (개발 환경에서만) */}
-          <SupabaseDebug />
+          {/* Supabase 디버그 (개발 환경에서만 렌더 → 프로덕션에서 연결 테스트 쿼리 방지) */}
+          {process.env.NODE_ENV !== "production" && <SupabaseDebug />}
         </AlertProvider>
       </body>
     </html>

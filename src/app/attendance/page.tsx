@@ -227,9 +227,9 @@ export default function AttendancePage() {
     });
     setConfirmAction(() => async () => {
       try {
-        await removeAttendance(participantId, participantType);
-        const today = await getTodayAttendance();
-        setTodayParticipants(today.participants);
+        // removeAttendance가 갱신된 목록을 반환하므로 별도 재조회하지 않는다.
+        const { participants } = await removeAttendance(participantId, participantType);
+        setTodayParticipants(participants);
         showAlert('출석이 취소되었습니다.', 'success');
       } catch (e) {
         const msg = e instanceof Error ? e.message : '출석 취소 실패';

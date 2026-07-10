@@ -6,7 +6,6 @@ import {
   saveAppSettings,
   listMembers,
   deleteMember,
-  updateMemberSkill,
   updateMember,
   getTotalGamesCount,
   getTotalShuttlesCount,
@@ -84,7 +83,8 @@ export default function SettingsPage() {
     setConfirmAction(() => async () => {
       try {
         await deleteMember(member.id);
-        await refreshData(); // 데이터 새로고침
+        // 전체 재조회 대신 로컬 상태만 갱신 (전체 페이지 스피너/4쿼리 방지)
+        setMembers((prev) => prev.filter((m) => m.id !== member.id));
         showAlert("회원이 삭제되었습니다.", 'success');
       } catch {
         showAlert("회원 삭제에 실패했습니다.", 'error');
@@ -94,25 +94,16 @@ export default function SettingsPage() {
     setShowConfirmModal(true);
   };
 
-  const handleUpdateSkill = async (member: Member, newSkill: Skill) => {
-    try {
-      await updateMemberSkill(member.id, newSkill);
-      await refreshData(); // 데이터 새로고침
-      showAlert("급수가 수정되었습니다.", 'success');
-    } catch {
-      showAlert("급수 수정에 실패했습니다.", 'error');
-    }
-  };
-
   const handleUpdateMember = async (updatedMember: Member) => {
     try {
-      await updateMember(updatedMember.id, {
+      const saved = await updateMember(updatedMember.id, {
         name: updatedMember.name,
         birthYear: updatedMember.birthYear,
         gender: updatedMember.gender,
         skill: updatedMember.skill
       });
-      await refreshData(); // 데이터 새로고침
+      // 전체 재조회 대신 로컬 상태만 갱신
+      setMembers((prev) => prev.map((m) => (m.id === saved.id ? saved : m)));
       showAlert("회원 정보가 수정되었습니다.", 'success');
     } catch {
       showAlert("회원 정보 수정에 실패했습니다.", 'error');
@@ -199,9 +190,7 @@ export default function SettingsPage() {
           {activeTab === "members" && (
             <MemberManagement
               members={members}
-              setMembers={setMembers}
               onDeleteMember={handleDeleteMember}
-              onUpdateSkill={handleUpdateSkill}
               onUpdateMember={handleUpdateMember}
             />
           )}
@@ -464,9 +453,7 @@ function MemberManagement({
   onUpdateMember,
 }: {
   members: Member[];
-  setMembers: (members: Member[]) => void;
   onDeleteMember: (member: Member) => void;
-  onUpdateSkill: (member: Member, skill: Skill) => void;
   onUpdateMember: (member: Member) => void;
 }) {
   const [editingMember, setEditingMember] = useState<Member | null>(null);

@@ -1,54 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-
-interface AlertProps {
-  message: string;
-  type?: 'success' | 'error' | 'warning' | 'info';
-  onClose: () => void;
-}
-
-export function CustomAlert({ message, type = 'info', onClose }: AlertProps) {
-  const [isVisible, setIsVisible] = useState(true);
-
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setIsVisible(false);
-      // 페이드 아웃 애니메이션 후 완전히 제거
-      setTimeout(() => {
-        onClose();
-      }, 3000); // 페이드 아웃 애니메이션 시간
-    }, 1500); // 1.5초 후 페이드 아웃 시작
-
-    return () => clearTimeout(timer);
-  }, [onClose]);
-
-  return (
-    <div
-      className={`fixed top-6 left-1/2 transform -translate-x-1/2 z-50 transition-all duration-300 ${
-        isVisible
-          ? 'animate-in slide-in-from-top opacity-100'
-          : 'animate-out slide-out-to-top opacity-0'
-      }`}
-    >
-      <div className={`px-6 py-4 rounded-xl border shadow-xl max-w-md min-w-[320px] ${getTypeStyles(type)}`}>
-        <div className="flex items-center gap-4">
-          <span className="text-xl">{getIcon(type)}</span>
-          <p className="font-semibold text-base flex-1">{message}</p>
-          <button
-            onClick={() => {
-              setIsVisible(false);
-              setTimeout(() => onClose(), 200);
-            }}
-            className="text-gray-500 hover:text-gray-700 text-lg font-bold"
-          >
-            ✕
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
+import { useState, useEffect, useCallback, useMemo } from 'react';
 
 // 유틸리티 함수들을 전역으로 이동
 const getTypeStyles = (type: 'success' | 'error' | 'warning' | 'info') => {
@@ -137,17 +89,20 @@ function AlertItem({ alert, onRemove }: {
 export function AlertProvider({ children }: { children: ReactNode }) {
   const [alerts, setAlerts] = useState<Array<{ id: string; message: string; type: 'success' | 'error' | 'warning' | 'info' }>>([]);
 
-  const showAlert = (message: string, type: 'success' | 'error' | 'warning' | 'info' = 'info') => {
+  const showAlert = useCallback((message: string, type: 'success' | 'error' | 'warning' | 'info' = 'info') => {
     const id = Date.now().toString();
     setAlerts(prev => [...prev, { id, message, type }]);
-  };
+  }, []);
 
-  const removeAlert = (id: string) => {
+  const removeAlert = useCallback((id: string) => {
     setAlerts(prev => prev.filter(alert => alert.id !== id));
-  };
+  }, []);
+
+  // context value를 메모이제이션해 토스트가 뜰 때마다 전체 앱이 리렌더되는 것을 막는다.
+  const contextValue = useMemo(() => ({ showAlert }), [showAlert]);
 
   return (
-    <AlertContext.Provider value={{ showAlert }}>
+    <AlertContext.Provider value={contextValue}>
       {children}
       <div className="fixed top-6 left-1/2 transform -translate-x-1/2 z-50 space-y-3">
         {alerts.map((alert) => (
