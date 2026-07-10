@@ -535,7 +535,7 @@ export default function AttendancePage() {
     {showMemberModal && (
       <Modal onClose={()=>setShowMemberModal(false)} title="회원 추가">
         <div className="flex flex-col gap-3">
-          <input value={name} onChange={e=>setName(e.target.value)} placeholder="이름" className="notion-input" />
+          <input value={name} onChange={e=>setName(e.target.value)} placeholder="이름" maxLength={20} className="notion-input" />
           <BirthYearSelect value={birthYear} onChange={setBirthYear} />
           <div className="flex gap-2">
             <select value={gender} onChange={e=>setGender(e.target.value as Gender)} className="notion-input">
@@ -560,7 +560,7 @@ export default function AttendancePage() {
     {showGuestModal && (
       <Modal onClose={()=>setShowGuestModal(false)} title="게스트 추가">
         <div className="flex flex-col gap-3">
-          <input value={gName} onChange={e=>setGName(e.target.value)} placeholder="이름" className="notion-input" />
+          <input value={gName} onChange={e=>setGName(e.target.value)} placeholder="이름" maxLength={20} className="notion-input" />
           <BirthYearSelect value={gBirthYear} onChange={setGBirthYear} />
           <div className="flex gap-2">
             <select value={gGender} onChange={e=>setGGender(e.target.value as Gender)} className="notion-input">

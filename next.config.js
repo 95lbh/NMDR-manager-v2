@@ -30,6 +30,19 @@ const nextConfig = {
   async headers() {
     return [
       {
+        // 전역 보안 헤더 (클릭재킹·MIME 스니핑·리퍼러 과다 노출 방지)
+        source: '/:path*',
+        headers: [
+          { key: 'X-Frame-Options', value: 'DENY' },
+          { key: 'X-Content-Type-Options', value: 'nosniff' },
+          { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
+          {
+            key: 'Permissions-Policy',
+            value: 'camera=(), microphone=(), geolocation=()',
+          },
+        ],
+      },
+      {
         source: '/manifest.json',
         headers: [{ key: 'Content-Type', value: 'application/manifest+json' }],
       },

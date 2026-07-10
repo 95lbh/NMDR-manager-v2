@@ -10,8 +10,7 @@
     "test": "playwright test",
     "generate-icons": "node scripts/generate-icons.js",
     "build-production": "npm run generate-icons && npm run build",
-    "export": "next build && next export",
-    "analyze": "cross-env ANALYZE=true npm run build"
+    "export": "next build && next export"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.54.0",

@@ -736,6 +736,7 @@ function EditMemberModal({ member, onClose, onSave }: {
               onChange={e => setName(e.target.value)}
               className="notion-input w-full"
               placeholder="이름을 입력하세요"
+              maxLength={20}
             />
           </div>
 
@@ -1251,10 +1252,10 @@ function SystemInfo() {
             <div className="font-medium">Next.js</div>
             <div className="text-sm opacity-80">Framework</div>
           </div>
-          <div className="text-center p-4 bg-orange-50 rounded-lg border border-orange-200">
-            <div className="text-2xl mb-2">🔥</div>
-            <div className="font-medium text-orange-700">Firebase</div>
-            <div className="text-sm text-orange-600">Database</div>
+          <div className="text-center p-4 bg-green-50 rounded-lg border border-green-200">
+            <div className="text-2xl mb-2">⚡</div>
+            <div className="font-medium text-green-700">Supabase</div>
+            <div className="text-sm text-green-600">Database</div>
           </div>
           <div className="text-center p-4 bg-blue-50 rounded-lg border border-blue-200">
             <div className="text-2xl mb-2">🎨</div>
