@@ -9,7 +9,6 @@ import {
   getTodayPlayerStatsBatch,
   loadGameState,
   saveGameState,
-  subscribeToGameState,
 } from "@/lib/supabase-db";
 import type { AppSettings } from "@/types/settings";
 import type { Skill, Gender } from "@/types/db";
@@ -37,32 +36,6 @@ interface Court {
   team?: Team;
   startedAt?: Date;
   duration?: number; // 분 단위
-}
-
-// 동기화에 의미 있는 필드만 안정적으로 직렬화한다.
-// 실시간 구독으로 되돌아온 "내가 방금 저장한 변경(에코)"을 감지해
-// 저장↔구독 무한 루프를 끊는 데 사용한다.
-function serializeGameState(teams: Team[], courts: Court[]): string {
-  const normPlayers = (players: Player[]) =>
-    players.map((p) => ({
-      id: p.id,
-      name: p.name,
-      skill: p.skill,
-      gender: p.gender,
-      isGuest: p.isGuest,
-    }));
-  return JSON.stringify({
-    teams: teams.map((t) => ({ id: t.id, players: normPlayers(t.players) })),
-    courts: courts.map((c) => ({
-      id: c.id,
-      status: c.status,
-      startedAt: c.startedAt ? new Date(c.startedAt).getTime() : null,
-      duration: c.duration ?? null,
-      team: c.team
-        ? { id: c.team.id, players: normPlayers(c.team.players) }
-        : null,
-    })),
-  });
 }
 
 // 진행 중인 코트의 경과 시간만 1초마다 갱신하는 독립 컴포넌트.
@@ -106,10 +79,6 @@ export default function GamePage() {
   const [loading, setLoading] = useState(true);
   const [finishingGames, setFinishingGames] = useState<Set<number>>(new Set());
   const [editingTeam, setEditingTeam] = useState<Team | null>(null);
-
-  // 마지막으로 저장/수신한 게임 상태의 시그니처.
-  // 실시간 구독으로 되돌아온 에코를 무시해 저장↔구독 무한 루프를 차단한다.
-  const lastSyncedSignatureRef = useRef<string | null>(null);
 
   // 롱프레스(길게 눌러 상태 지정) 타이머. DOM 리스너 누적 없이 관리한다.
   const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -291,13 +260,6 @@ export default function GamePage() {
 
       if (restoredTeams.length > 0) setTeams(restoredTeams);
       if (restoredCourts.length > 0) setCourts(restoredCourts);
-
-      // 방금 불러온 상태는 이미 서버와 동일하므로, 자동저장이 이를
-      // 즉시 재저장하지 않도록 시그니처를 기록해 둔다.
-      lastSyncedSignatureRef.current = serializeGameState(
-        restoredTeams,
-        restoredCourts
-      );
       return true;
     } catch (error) {
       console.error("게임 상태 불러오기 실패:", error);
@@ -306,7 +268,6 @@ export default function GamePage() {
   }, []);
 
   useEffect(() => {
-    let unsubscribe: (() => void) | undefined;
     (async () => {
       try {
         setLoading(true);
@@ -331,83 +292,21 @@ export default function GamePage() {
           setCourts(initialCourts);
         }
 
-        // Supabase 실시간 동기화 설정
-        unsubscribe = subscribeToGameState((gameState) => {
-          if (!gameState) return;
-
-          const restoredTeams: Team[] = (gameState.teams || []).map((team) => ({
-            id: team.id,
-            players: team.players.map((player) => ({
-              id: player.id,
-              name: player.name,
-              skill: player.skill as Skill,
-              gender: player.gender as Gender,
-              isGuest: player.isGuest,
-              gamesPlayedToday: 0, // 실시간 동기화에서는 0으로 초기화
-            })),
-            createdAt: new Date(),
-          }));
-
-          const restoredCourts: Court[] = (gameState.courts || []).map(
-            (court) => ({
-              id: court.id,
-              status: court.status as "idle" | "playing" | "finished",
-              team: court.team
-                ? {
-                    id: court.team.id,
-                    players: court.team.players.map((player) => ({
-                      id: player.id,
-                      name: player.name,
-                      skill: player.skill as Skill,
-                      gender: player.gender as Gender,
-                      isGuest: player.isGuest,
-                      gamesPlayedToday: 0,
-                    })),
-                    createdAt: new Date(),
-                  }
-                : undefined,
-              startedAt: court.startedAt
-                ? new Date(court.startedAt)
-                : undefined,
-              duration: court.duration,
-            })
-          );
-
-          // 내가 방금 저장한 변경이 그대로 되돌아온 것이면(에코) 무시해
-          // 저장↔구독 무한 루프를 끊는다. 다른 기기의 변경만 반영한다.
-          const incomingSig = serializeGameState(restoredTeams, restoredCourts);
-          if (incomingSig === lastSyncedSignatureRef.current) return;
-          lastSyncedSignatureRef.current = incomingSig;
-
-          setTeams(restoredTeams);
-          setCourts(restoredCourts);
-        });
-
       } catch (e) {
         console.error("게임 페이지 초기화 실패:", e);
       } finally {
         setLoading(false);
       }
     })();
-
-    return () => {
-      if (unsubscribe) unsubscribe();
-    };
   }, [loadPlayersWithStats, loadGameStateFromDB]);
 
   // 게임 상태 변경 시 자동 저장 (디바운싱)
+  // 단일 기기 운영이라 실시간 구독이 없어 저장↔구독 루프가 발생하지 않는다.
+  // 저장은 새로고침/재시작 시 게임판 복원을 위한 것.
   useEffect(() => {
     if (loading || (courts.length === 0 && teams.length === 0)) return;
 
-    // 실시간 구독으로 들어온 변경(에코)이면 다시 저장하지 않는다.
-    const currentSig = serializeGameState(teams, courts);
-    if (currentSig === lastSyncedSignatureRef.current) return;
-
     const timeoutId = setTimeout(() => {
-      // 이 변경이 곧 서버로 나가므로 시그니처를 먼저 기록해,
-      // 되돌아올 실시간 에코를 무시하도록 한다.
-      lastSyncedSignatureRef.current = currentSig;
-      // Supabase에 팀 + 코트 상태 저장
       saveCurrentGameState();
     }, 500); // 500ms 디바운싱
 
