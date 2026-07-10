@@ -6,6 +6,7 @@ import type { Gender, Skill, Member, AttendanceParticipant } from '@/types/db';
 import { useAlert } from '@/components/CustomAlert';
 import { usePreventDuplicate } from '@/hooks/usePreventDuplicate';
 import ConfirmModal from '@/components/ConfirmModal';
+import { BIRTH_YEARS } from '@/lib/constants';
 const SKILLS: Skill[] = ['S','A','B','C','D','E','F'];
 
 // 초성 계산 유틸
@@ -212,7 +213,10 @@ export default function AttendancePage() {
         shuttles: gShuttles,
       }).catch(e => {
         console.error('게스트 출석 동기화 실패:', e);
-        // 실패 시 UI에서 제거하지 않음 (오프라인 저장소에서 재시도)
+        // 저장 실패 시 낙관적으로 추가한 항목을 되돌리고 원인을 알린다
+        // (중복 출석 등 서버 메시지를 그대로 노출).
+        setTodayParticipants(prev => prev.filter(p => p !== newGuest));
+        showAlert(e instanceof Error ? e.message : '게스트 출석 저장에 실패했습니다.', 'error');
       });
     } catch (e) {
       const msg = e instanceof Error ? e.message : '게스트 출석 실패';
@@ -522,7 +526,7 @@ export default function AttendancePage() {
           <input value={name} onChange={e=>setName(e.target.value)} placeholder="이름" className="notion-input" />
           <select value={birthYear} onChange={e=>setBirthYear(e.target.value ? Number(e.target.value) : '')} className="notion-input">
               <option value="">출생년도 선택</option>
-              {Array.from({length: 26}, (_, i) => 2005 - i).map(year => (
+              {BIRTH_YEARS.map(year => (
                 <option key={year} value={year}>{year}년</option>
               ))}
             </select>
@@ -552,7 +556,7 @@ export default function AttendancePage() {
           <input value={gName} onChange={e=>setGName(e.target.value)} placeholder="이름" className="notion-input" />
           <select value={gBirthYear} onChange={e=>setGBirthYear(e.target.value ? Number(e.target.value) : '')} className="notion-input">
               <option value="">출생년도 선택</option>
-              {Array.from({length: 26}, (_, i) => 2005 - i).map(year => (
+              {BIRTH_YEARS.map(year => (
                 <option key={year} value={year}>{year}년</option>
               ))}
             </select>
@@ -647,7 +651,9 @@ export default function AttendancePage() {
                       shuttles: selectedShuttles,
                     }).catch(e => {
                       console.error('회원 출석 동기화 실패:', e);
-                      // 실패 시 UI에서 제거하지 않음 (오프라인 저장소에서 재시도)
+                      // 저장 실패 시 낙관적으로 추가한 항목을 되돌리고 원인을 알린다.
+                      setTodayParticipants(prev => prev.filter(p => p !== newMember));
+                      showAlert(e instanceof Error ? e.message : '회원 출석 저장에 실패했습니다.', 'error');
                     });
                     return true;
                   } catch (e) {
