@@ -4,10 +4,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { createMember, listMembers, markAttendance, getTodayAttendance, removeAttendance } from '@/lib/supabase-db';
 import type { Gender, Skill, Member, AttendanceParticipant } from '@/types/db';
 import { useAlert } from '@/components/CustomAlert';
-import { usePreventDuplicate } from '@/hooks/useGameState';
+import { usePreventDuplicate } from '@/hooks/usePreventDuplicate';
 import ConfirmModal from '@/components/ConfirmModal';
-// import OnlineStatusIndicator from '@/components/OnlineStatusIndicator';
-// import OfflineStorage from '@/lib/offline-storage';
 const SKILLS: Skill[] = ['S','A','B','C','D','E','F'];
 
 // 초성 계산 유틸

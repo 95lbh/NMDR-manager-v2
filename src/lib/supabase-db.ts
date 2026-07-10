@@ -282,21 +282,43 @@ export async function getTodayAttendance(): Promise<{ date: string; participants
 export async function removeAttendance(participantId: string, participantType: 'member' | 'guest'): Promise<Attendance> {
   const dateKey = todayKey();
 
-  let deleteQuery = supabase
-    .from('attendance_participants')
-    .delete()
-    .eq('attendance_date', dateKey);
-
   if (participantType === 'member') {
-    deleteQuery = deleteQuery.eq('member_id', participantId);
+    // 회원은 member_id가 고유하므로 그대로 삭제 (하루 1회 중복 방지됨)
+    const { error } = await supabase
+      .from('attendance_participants')
+      .delete()
+      .eq('attendance_date', dateKey)
+      .eq('member_id', participantId);
+
+    if (error) {
+      throw new Error(`출석 취소 실패: ${error.message}`);
+    }
   } else {
-    deleteQuery = deleteQuery.eq('name', participantId); // 게스트는 이름으로 식별
-  }
+    // 게스트는 고유 식별자가 없어 이름으로 찾되, 동명이인이 있어도
+    // 전부 삭제되지 않도록 매칭되는 첫 행의 PK(id) 하나만 삭제한다.
+    const { data: rows, error: findError } = await supabase
+      .from('attendance_participants')
+      .select('id')
+      .eq('attendance_date', dateKey)
+      .eq('participant_type', 'guest')
+      .eq('name', participantId)
+      .order('id', { ascending: true })
+      .limit(1);
 
-  const { error } = await deleteQuery;
+    if (findError) {
+      throw new Error(`출석 취소 실패: ${findError.message}`);
+    }
 
-  if (error) {
-    throw new Error(`출석 취소 실패: ${error.message}`);
+    if (rows && rows.length > 0) {
+      const { error } = await supabase
+        .from('attendance_participants')
+        .delete()
+        .eq('id', rows[0].id);
+
+      if (error) {
+        throw new Error(`출석 취소 실패: ${error.message}`);
+      }
+    }
   }
 
   // 업데이트된 출석 정보 반환
@@ -400,6 +422,138 @@ export async function updatePlayerGameStats(playerId: string, playerName: string
 
   if (error) {
     throw new Error(`게임 통계 업데이트 실패: ${error.message}`);
+  }
+}
+
+// 여러 플레이어의 오늘 통계를 한 번에 조회한다 (N+1 방지).
+// 오늘 통계 행이 없는 플레이어는 누적 총게임수를 배치로 계산해 upsert로 한꺼번에 생성한다.
+export async function getTodayPlayerStatsBatch(
+  players: { id: string; name: string; type: "member" | "guest" }[]
+): Promise<Record<string, PlayerGameStats>> {
+  const today = todayKey();
+  const result: Record<string, PlayerGameStats> = {};
+  if (players.length === 0) return result;
+
+  const statsIds = players.map((p) => `${p.id}_${today}`);
+
+  // 1. 오늘 통계 배치 조회 (1 쿼리)
+  const { data: existing, error } = await supabase
+    .from('game_stats')
+    .select('*')
+    .in('id', statsIds);
+
+  if (error) {
+    throw new Error(`게임 통계 배치 조회 실패: ${error.message}`);
+  }
+
+  const existingMap = new Map((existing || []).map((r) => [r.id as string, r]));
+
+  // 2. 오늘 통계가 없는(cold) 플레이어만 추림
+  const missing = players.filter((p) => !existingMap.has(`${p.id}_${today}`));
+
+  // 3. 누락 플레이어의 누적 총게임수를 배치로 조회 (최대 1 쿼리)
+  const totalsMap = new Map<string, number>();
+  if (missing.length > 0) {
+    const missingIds = missing.map((p) => p.id);
+    const { data: totals, error: totalsError } = await supabase
+      .from('game_stats')
+      .select('player_id, total_games_played, last_updated')
+      .in('player_id', missingIds)
+      .order('last_updated', { ascending: false });
+
+    if (totalsError) {
+      throw new Error(`총 게임 수 배치 조회 실패: ${totalsError.message}`);
+    }
+
+    // player_id별 최신 행의 total만 사용
+    for (const row of totals || []) {
+      if (!totalsMap.has(row.player_id)) {
+        totalsMap.set(row.player_id, row.total_games_played || 0);
+      }
+    }
+  }
+
+  // 4. 누락분 오늘 통계 행을 배치 생성 (최대 1 쿼리)
+  const nowIso = new Date().toISOString();
+  if (missing.length > 0) {
+    const rows = missing.map((p) => ({
+      id: `${p.id}_${today}`,
+      player_id: p.id,
+      player_name: p.name,
+      player_type: p.type,
+      date: today,
+      games_played_today: 0,
+      total_games_played: totalsMap.get(p.id) || 0,
+      last_updated: nowIso,
+    }));
+
+    const { error: upsertError } = await supabase
+      .from('game_stats')
+      .upsert(rows, { onConflict: 'id' });
+
+    if (upsertError) {
+      throw new Error(`게임 통계 배치 생성 실패: ${upsertError.message}`);
+    }
+  }
+
+  // 5. 결과 조립
+  for (const p of players) {
+    const row = existingMap.get(`${p.id}_${today}`);
+    result[p.id] = row
+      ? {
+          playerId: row.player_id,
+          playerName: row.player_name,
+          playerType: row.player_type,
+          date: row.date,
+          gamesPlayedToday: row.games_played_today,
+          totalGamesPlayed: row.total_games_played,
+          lastUpdated: row.last_updated,
+        }
+      : {
+          playerId: p.id,
+          playerName: p.name,
+          playerType: p.type,
+          date: today,
+          gamesPlayedToday: 0,
+          totalGamesPlayed: totalsMap.get(p.id) || 0,
+          lastUpdated: nowIso,
+        };
+  }
+
+  return result;
+}
+
+// 여러 플레이어의 오늘/누적 게임 수를 한 번에 +1 한다 (게임 종료 시 4명 순차 업데이트 대체).
+export async function updatePlayerGameStatsBatch(
+  players: { id: string; name: string; type: "member" | "guest" }[]
+): Promise<void> {
+  const today = todayKey();
+  if (players.length === 0) return;
+
+  // 현재 값을 배치로 확보(없으면 생성됨)
+  const statsMap = await getTodayPlayerStatsBatch(players);
+
+  const nowIso = new Date().toISOString();
+  const rows = players.map((p) => {
+    const cur = statsMap[p.id];
+    return {
+      id: `${p.id}_${today}`,
+      player_id: p.id,
+      player_name: p.name,
+      player_type: p.type,
+      date: today,
+      games_played_today: cur.gamesPlayedToday + 1,
+      total_games_played: cur.totalGamesPlayed + 1,
+      last_updated: nowIso,
+    };
+  });
+
+  const { error } = await supabase
+    .from('game_stats')
+    .upsert(rows, { onConflict: 'id' });
+
+  if (error) {
+    throw new Error(`게임 통계 배치 업데이트 실패: ${error.message}`);
   }
 }
 
@@ -554,7 +708,7 @@ export async function resetMembersData(): Promise<void> {
 // ===== 게임 상태 관리 함수들 =====
 
 export async function saveGameState(gameState: GameState): Promise<void> {
-  const today = new Date().toISOString().split('T')[0];
+  const today = todayKey();
 
   const { error } = await supabase
     .from('game_states')
@@ -571,7 +725,7 @@ export async function saveGameState(gameState: GameState): Promise<void> {
 }
 
 export async function loadGameState(): Promise<GameState | null> {
-  const today = new Date().toISOString().split('T')[0];
+  const today = todayKey();
 
   const { data, error } = await supabase
     .from('game_states')
@@ -591,7 +745,7 @@ export async function loadGameState(): Promise<GameState | null> {
 
 // 실시간 게임 상태 구독
 export function subscribeToGameState(callback: (gameState: GameState | null) => void) {
-  const today = new Date().toISOString().split('T')[0];
+  const today = todayKey();
 
   const subscription = supabase
     .channel('game_states_changes')

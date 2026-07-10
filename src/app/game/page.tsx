@@ -1,12 +1,12 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import {
   getAppSettings,
   listMembers,
   getTodayAttendance,
-  updatePlayerGameStats,
-  getTodayPlayerStats,
+  updatePlayerGameStatsBatch,
+  getTodayPlayerStatsBatch,
   loadGameState,
   saveGameState,
   subscribeToGameState,
@@ -14,12 +14,6 @@ import {
 import type { AppSettings } from "@/types/settings";
 import type { Skill, Gender } from "@/types/db";
 import { useAlert } from "@/components/CustomAlert";
-import { useGameState, usePreventDuplicate } from "@/hooks/useGameState";
-import { useOfflineGameState } from "@/hooks/useOfflineGameState";
-import {
-  ConflictResolver,
-  SyncStatusIndicator,
-} from "@/components/ConflictResolver";
 import OnlineStatusIndicator from "@/components/OnlineStatusIndicator";
 import ConfirmModal from "@/components/ConfirmModal";
 interface Player {
@@ -45,30 +39,62 @@ interface Court {
   duration?: number; // 분 단위
 }
 
+// 동기화에 의미 있는 필드만 안정적으로 직렬화한다.
+// 실시간 구독으로 되돌아온 "내가 방금 저장한 변경(에코)"을 감지해
+// 저장↔구독 무한 루프를 끊는 데 사용한다.
+function serializeGameState(teams: Team[], courts: Court[]): string {
+  const normPlayers = (players: Player[]) =>
+    players.map((p) => ({
+      id: p.id,
+      name: p.name,
+      skill: p.skill,
+      gender: p.gender,
+      isGuest: p.isGuest,
+    }));
+  return JSON.stringify({
+    teams: teams.map((t) => ({ id: t.id, players: normPlayers(t.players) })),
+    courts: courts.map((c) => ({
+      id: c.id,
+      status: c.status,
+      startedAt: c.startedAt ? new Date(c.startedAt).getTime() : null,
+      duration: c.duration ?? null,
+      team: c.team
+        ? { id: c.team.id, players: normPlayers(c.team.players) }
+        : null,
+    })),
+  });
+}
 
-
+// 진행 중인 코트의 경과 시간만 1초마다 갱신하는 독립 컴포넌트.
+// 게임판 전체가 매초 리렌더되는 것을 막는다.
+function CourtTimer({ startedAt }: { startedAt: Date }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+  const diffMs = now - startedAt.getTime();
+  const diffMinutes = Math.floor(diffMs / (1000 * 60));
+  const diffSeconds = Math.floor((diffMs % (1000 * 60)) / 1000);
+  return <>{`${diffMinutes}:${diffSeconds.toString().padStart(2, "0")}`}</>;
+}
 
 
 export default function GamePage() {
   const { showAlert } = useAlert();
-  const {
-    gameState: savedGameState,
-    syncStatus,
-    saveGameState: saveLocalGameState,
-    syncWithServer,
-    resolveConflict,
-  } = useGameState();
-  const { executeOnce } = usePreventDuplicate();
 
-  // 오프라인 최적화 상태 관리
-  const {
-    isOnline,
-    pendingSyncCount,
-    updateCourtsInstant,
-    updateTeamsInstant,
-    updateGameStateInstant,
-    forceSync
-  } = useOfflineGameState();
+  // 온라인 상태 (상단 표시기용) — navigator.onLine 기반
+  const [isOnline, setIsOnline] = useState(true);
+  useEffect(() => {
+    const update = () => setIsOnline(navigator.onLine);
+    update();
+    window.addEventListener("online", update);
+    window.addEventListener("offline", update);
+    return () => {
+      window.removeEventListener("online", update);
+      window.removeEventListener("offline", update);
+    };
+  }, []);
 
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [courts, setCourts] = useState<Court[]>([]);
@@ -78,9 +104,15 @@ export default function GamePage() {
   const [selectedTeam, setSelectedTeam] = useState<Team | null>(null);
   const [showPlayerModal, setShowPlayerModal] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [currentTime, setCurrentTime] = useState(new Date());
   const [finishingGames, setFinishingGames] = useState<Set<number>>(new Set());
   const [editingTeam, setEditingTeam] = useState<Team | null>(null);
+
+  // 마지막으로 저장/수신한 게임 상태의 시그니처.
+  // 실시간 구독으로 되돌아온 에코를 무시해 저장↔구독 무한 루프를 차단한다.
+  const lastSyncedSignatureRef = useRef<string | null>(null);
+
+  // 롱프레스(길게 눌러 상태 지정) 타이머. DOM 리스너 누적 없이 관리한다.
+  const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // 플레이어 상태 관리 (집에 감, 레슨 중)
   const [playerStates, setPlayerStates] = useState<
@@ -100,69 +132,71 @@ export default function GamePage() {
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
   const [cancelCourtId, setCancelCourtId] = useState<number | null>(null);
 
-  // 플레이어 통계 새로고침
-  const refreshPlayerStats = async () => {
-    try {
-      const [members, attendance] = await Promise.all([
-        listMembers(),
-        getTodayAttendance(),
-      ]);
+  // 오늘 출석 참가자(회원+게스트)를 통계와 함께 배치로 로드한다.
+  // 초기 로드/새로고침/통계 갱신에서 공통 사용. (기존 플레이어별 N+1 순차 조회 제거)
+  const loadPlayersWithStats = useCallback(async (): Promise<Player[]> => {
+    const [members, attendance] = await Promise.all([
+      listMembers(),
+      getTodayAttendance(),
+    ]);
 
-      const players: Player[] = [];
+    type Entry = {
+      id: string;
+      name: string;
+      type: "member" | "guest";
+      skill: Skill;
+      gender: Gender;
+      isGuest: boolean;
+    };
+    const entries: Entry[] = [];
 
-      // 회원 처리
-      const memberParticipants = attendance.participants.filter(
-        (p) => p.type === "member"
-      );
-      for (const participant of memberParticipants) {
-        if (participant.type === "member") {
-          const member = members.find((m) => m.id === participant.memberId);
-          if (member) {
-            const stats = await getTodayPlayerStats(
-              member.id,
-              member.name,
-              "member"
-            );
-            players.push({
-              id: member.id,
-              name: member.name,
-              skill: member.skill,
-              gender: member.gender,
-              gamesPlayedToday: stats.gamesPlayedToday,
-              isGuest: false,
-            });
-          }
-        }
-      }
-
-      // 게스트 처리
-      const guestParticipants = attendance.participants.filter(
-        (p) => p.type === "guest"
-      );
-      for (const [index, participant] of guestParticipants.entries()) {
-        if (participant.type === "guest") {
-          const guestId = `guest-${index}`;
-          const stats = await getTodayPlayerStats(
-            guestId,
-            participant.name,
-            "guest"
-          );
-          players.push({
-            id: guestId,
-            name: participant.name,
-            skill: participant.skill,
-            gender: participant.gender,
-            gamesPlayedToday: stats.gamesPlayedToday,
-            isGuest: true,
+    // 회원 먼저
+    for (const p of attendance.participants) {
+      if (p.type === "member") {
+        const member = members.find((m) => m.id === p.memberId);
+        if (member) {
+          entries.push({
+            id: member.id,
+            name: member.name,
+            type: "member",
+            skill: member.skill,
+            gender: member.gender,
+            isGuest: false,
           });
         }
       }
-
-      setAvailablePlayers(players.sort((a, b) => a.name.localeCompare(b.name)));
-    } catch (error) {
-      console.error("플레이어 통계 새로고침 실패:", error);
     }
-  };
+    // 게스트 (guest-index 규칙 유지)
+    let guestIndex = 0;
+    for (const p of attendance.participants) {
+      if (p.type === "guest") {
+        entries.push({
+          id: `guest-${guestIndex++}`,
+          name: p.name,
+          type: "guest",
+          skill: p.skill,
+          gender: p.gender,
+          isGuest: true,
+        });
+      }
+    }
+
+    // 통계 배치 조회 (N+1 → 최대 3쿼리)
+    const statsMap = await getTodayPlayerStatsBatch(
+      entries.map((e) => ({ id: e.id, name: e.name, type: e.type }))
+    );
+
+    const players: Player[] = entries.map((e) => ({
+      id: e.id,
+      name: e.name,
+      skill: e.skill,
+      gender: e.gender,
+      isGuest: e.isGuest,
+      gamesPlayedToday: statsMap[e.id]?.gamesPlayedToday ?? 0,
+    }));
+
+    return players.sort((a, b) => a.name.localeCompare(b.name));
+  }, []);
 
   // 게임 상태를 Supabase에 저장
   const saveCurrentGameState = useCallback(async () => {
@@ -200,143 +234,92 @@ export default function GamePage() {
       }));
 
       await saveGameState({ teams: gameTeams, courts: gameCourts });
-      console.log("Supabase에 게임 상태 저장 완료 (팀 + 코트)");
     } catch (error) {
       console.error("게임 상태 저장 실패:", error);
     }
   }, [teams, courts]);
 
-  // 게임 상태를 Supabase에서 불러오기
-  const loadGameStateFromDB = async () => {
+  // 게임 상태를 Supabase에서 불러오기. 저장된 상태가 있었는지 여부를 반환한다.
+  const loadGameStateFromDB = useCallback(async (): Promise<boolean> => {
     try {
       const gameState = await loadGameState();
+      if (!gameState) return false;
 
-      if (gameState) {
-        // 서버에서 불러온 팀들을 현재 상태에 설정 (타입 변환)
-        if (gameState.teams && gameState.teams.length > 0) {
-          const restoredTeams: Team[] = gameState.teams.map((team) => ({
-            id: team.id,
-            players: team.players.map((player) => ({
-              id: player.id,
-              name: player.name,
-              skill: player.skill as Skill,
-              gender: player.gender as Gender,
-              isGuest: player.isGuest,
-              gamesPlayedToday: 0, // 서버에서는 이 정보가 없으므로 0으로 초기화
-            })),
-            createdAt: new Date(),
-          }));
-          setTeams(restoredTeams);
-          console.log("Supabase에서 팀 상태 복원:", restoredTeams);
-        }
+      // 서버에서 불러온 팀들을 현재 상태에 설정 (타입 변환)
+      const restoredTeams: Team[] =
+        gameState.teams && gameState.teams.length > 0
+          ? gameState.teams.map((team) => ({
+              id: team.id,
+              players: team.players.map((player) => ({
+                id: player.id,
+                name: player.name,
+                skill: player.skill as Skill,
+                gender: player.gender as Gender,
+                isGuest: player.isGuest,
+                gamesPlayedToday: 0, // 서버에서는 이 정보가 없으므로 0으로 초기화
+              })),
+              createdAt: new Date(),
+            }))
+          : [];
 
-        // 서버에서 불러온 코트들을 현재 상태에 설정 (타입 변환)
-        if (gameState.courts && gameState.courts.length > 0) {
-          const restoredCourts: Court[] = gameState.courts.map((court) => ({
-            id: court.id,
-            status: court.status as "idle" | "playing" | "finished",
-            team: court.team
-              ? {
-                  id: court.team.id,
-                  players: court.team.players.map((player) => ({
-                    id: player.id,
-                    name: player.name,
-                    skill: player.skill as Skill,
-                    gender: player.gender as Gender,
-                    isGuest: player.isGuest,
-                    gamesPlayedToday: 0,
-                  })),
-                  createdAt: new Date(),
-                }
-              : undefined,
-            startedAt: court.startedAt ? new Date(court.startedAt) : undefined,
-            duration: court.duration,
-          }));
-          setCourts(restoredCourts);
-          console.log("Supabase에서 코트 상태 복원:", restoredCourts);
-        }
-      }
+      // 서버에서 불러온 코트들을 현재 상태에 설정 (타입 변환)
+      const restoredCourts: Court[] =
+        gameState.courts && gameState.courts.length > 0
+          ? gameState.courts.map((court) => ({
+              id: court.id,
+              status: court.status as "idle" | "playing" | "finished",
+              team: court.team
+                ? {
+                    id: court.team.id,
+                    players: court.team.players.map((player) => ({
+                      id: player.id,
+                      name: player.name,
+                      skill: player.skill as Skill,
+                      gender: player.gender as Gender,
+                      isGuest: player.isGuest,
+                      gamesPlayedToday: 0,
+                    })),
+                    createdAt: new Date(),
+                  }
+                : undefined,
+              startedAt: court.startedAt
+                ? new Date(court.startedAt)
+                : undefined,
+              duration: court.duration,
+            }))
+          : [];
+
+      if (restoredTeams.length > 0) setTeams(restoredTeams);
+      if (restoredCourts.length > 0) setCourts(restoredCourts);
+
+      // 방금 불러온 상태는 이미 서버와 동일하므로, 자동저장이 이를
+      // 즉시 재저장하지 않도록 시그니처를 기록해 둔다.
+      lastSyncedSignatureRef.current = serializeGameState(
+        restoredTeams,
+        restoredCourts
+      );
+      return true;
     } catch (error) {
       console.error("게임 상태 불러오기 실패:", error);
+      return false;
     }
-  };
+  }, []);
 
   useEffect(() => {
+    let unsubscribe: (() => void) | undefined;
     (async () => {
       try {
         setLoading(true);
-        const [appSettings, members, attendance] = await Promise.all([
-          getAppSettings(),
-          listMembers(),
-          getTodayAttendance(),
-        ]);
-
+        const appSettings = await getAppSettings();
         setSettings(appSettings);
 
-        // 오늘 출석한 회원들과 게스트들을 플레이어로 변환
-        const players: Player[] = [];
+        // 출석 플레이어 + 통계 배치 로드 (플레이어별 N+1 순차 조회 제거)
+        const players = await loadPlayersWithStats();
+        setAvailablePlayers(players);
 
-        // 회원 처리
-        const memberParticipants = attendance.participants.filter(
-          (p) => p.type === "member"
-        );
-        for (const participant of memberParticipants) {
-          if (participant.type === "member") {
-            const member = members.find((m) => m.id === participant.memberId);
-            if (member) {
-              // 오늘의 게임 통계 가져오기
-              const stats = await getTodayPlayerStats(
-                member.id,
-                member.name,
-                "member"
-              );
-              players.push({
-                id: member.id,
-                name: member.name,
-                skill: member.skill,
-                gender: member.gender,
-                gamesPlayedToday: stats.gamesPlayedToday,
-                isGuest: false,
-              });
-            }
-          }
-        }
-
-        // 게스트 처리
-        const guestParticipants = attendance.participants.filter(
-          (p) => p.type === "guest"
-        );
-        for (const [index, participant] of guestParticipants.entries()) {
-          if (participant.type === "guest") {
-            const guestId = `guest-${index}`;
-            // 오늘의 게임 통계 가져오기
-            const stats = await getTodayPlayerStats(
-              guestId,
-              participant.name,
-              "guest"
-            );
-            players.push({
-              id: guestId,
-              name: participant.name,
-              skill: participant.skill,
-              gender: participant.gender,
-              gamesPlayedToday: stats.gamesPlayedToday,
-              isGuest: true,
-            });
-          }
-        }
-
-        setAvailablePlayers(
-          players.sort((a, b) => a.name.localeCompare(b.name))
-        );
-
-        // 저장된 게임 상태 불러오기
-        await loadGameStateFromDB();
-
-        // 게임 상태 불러오기 후 코트 수 확인 및 초기화
-        const gameState = await loadGameState();
-
-        if (!gameState) {
+        // 저장된 게임 상태 복원 (반환값으로 중복 loadGameState 조회 제거)
+        const hadState = await loadGameStateFromDB();
+        if (!hadState) {
           // 저장된 게임 상태가 없으면 초기 코트 상태 생성
           const initialCourts: Court[] = Array.from(
             { length: appSettings.courtsCount },
@@ -349,142 +332,10 @@ export default function GamePage() {
         }
 
         // Supabase 실시간 동기화 설정
-        const unsubscribe = subscribeToGameState((gameState) => {
-          if (gameState) {
-            // 실시간으로 받은 팀 데이터를 현재 상태에 반영
-            if (gameState.teams) {
-              const restoredTeams: Team[] = gameState.teams.map((team) => ({
-                id: team.id,
-                players: team.players.map((player) => ({
-                  id: player.id,
-                  name: player.name,
-                  skill: player.skill as Skill,
-                  gender: player.gender as Gender,
-                  isGuest: player.isGuest,
-                  gamesPlayedToday: 0, // 실시간 동기화에서는 0으로 초기화
-                })),
-                createdAt: new Date(),
-              }));
-              setTeams(restoredTeams);
-              console.log("실시간 동기화로 팀 상태 업데이트:", restoredTeams);
-            }
+        unsubscribe = subscribeToGameState((gameState) => {
+          if (!gameState) return;
 
-            // 실시간으로 받은 코트 데이터를 현재 상태에 반영
-            if (gameState.courts) {
-              const restoredCourts: Court[] = gameState.courts.map((court) => ({
-                id: court.id,
-                status: court.status as "idle" | "playing" | "finished",
-                team: court.team
-                  ? {
-                      id: court.team.id,
-                      players: court.team.players.map((player) => ({
-                        id: player.id,
-                        name: player.name,
-                        skill: player.skill as Skill,
-                        gender: player.gender as Gender,
-                        isGuest: player.isGuest,
-                        gamesPlayedToday: 0,
-                      })),
-                      createdAt: new Date(),
-                    }
-                  : undefined,
-                startedAt: court.startedAt
-                  ? new Date(court.startedAt)
-                  : undefined,
-                duration: court.duration,
-              }));
-              setCourts(restoredCourts);
-              console.log(
-                "실시간 동기화로 코트 상태 업데이트:",
-                restoredCourts
-              );
-            }
-          }
-        });
-
-        return () => unsubscribe();
-      } catch (e) {
-        console.error("게임 페이지 초기화 실패:", e);
-      } finally {
-        setLoading(false);
-      }
-    })();
-  }, []);
-
-  // 게임 상태 변경 시 자동 저장 (디바운싱)
-  useEffect(() => {
-    if (!loading && (courts.length > 0 || teams.length > 0)) {
-      const timeoutId = setTimeout(() => {
-        // 로컬 게임 상태 저장
-        saveLocalGameState(courts, teams, availablePlayers);
-
-        // Supabase에도 저장 (팀 상태만)
-        if (teams.length > 0) {
-          saveCurrentGameState();
-        }
-      }, 500); // 500ms 디바운싱
-
-      return () => clearTimeout(timeoutId);
-    }
-  }, [courts, teams, loading, availablePlayers, saveLocalGameState, saveCurrentGameState]);
-
-  // 저장된 게임 상태 복원 (초기 로드 시에만)
-  const [hasInitiallyLoaded, setHasInitiallyLoaded] = useState(false);
-
-  useEffect(() => {
-    console.log("게임 상태 복원 체크:", {
-      savedGameState: !!savedGameState,
-      loading,
-      courtsLength: courts.length,
-      teamsLength: teams.length,
-      hasInitiallyLoaded,
-    });
-
-    // 초기 로드 시에만 복원하고, 이후에는 복원하지 않음
-    if (savedGameState && !loading && !hasInitiallyLoaded) {
-      console.log("저장된 게임 상태 복원:", savedGameState);
-
-      // 저장된 상태가 있고 현재 상태가 완전히 비어있는 경우에만 복원
-      // (게임 종료 후 복원 방지)
-      const hasActiveGames = courts.some(
-        (court) => court.status === "playing" || court.team
-      );
-      const hasTeams = teams.length > 0;
-      const shouldRestore =
-        savedGameState.courts.length > 0 &&
-        !hasActiveGames &&
-        !hasTeams &&
-        courts.length > 0 &&
-        (savedGameState.teams.length > 0 ||
-          savedGameState.courts.some((c) => c.team));
-
-      if (shouldRestore) {
-        // 코트 상태 복원 (타입 변환)
-        const restoredCourts: Court[] = savedGameState.courts.map((court) => ({
-          id: court.id,
-          status: court.status as "idle" | "playing" | "finished",
-          team: court.team
-            ? {
-                id: court.team.id,
-                players: court.team.players.map((player) => ({
-                  id: player.id,
-                  name: player.name,
-                  skill: player.skill as Skill,
-                  gender: player.gender as Gender,
-                  isGuest: player.isGuest,
-                  gamesPlayedToday: player.gamesPlayedToday,
-                })),
-                createdAt: new Date(court.team.createdAt),
-              }
-            : undefined,
-          startedAt: court.startedAt ? new Date(court.startedAt) : undefined,
-          duration: court.duration,
-        }));
-        setCourts(restoredCourts);
-
-        // 팀 상태 복원 (타입 변환)
-        if (savedGameState.teams.length > 0) {
-          const restoredTeams: Team[] = savedGameState.teams.map((team) => ({
+          const restoredTeams: Team[] = (gameState.teams || []).map((team) => ({
             id: team.id,
             players: team.players.map((player) => ({
               id: player.id,
@@ -492,29 +343,76 @@ export default function GamePage() {
               skill: player.skill as Skill,
               gender: player.gender as Gender,
               isGuest: player.isGuest,
-              gamesPlayedToday: player.gamesPlayedToday,
+              gamesPlayedToday: 0, // 실시간 동기화에서는 0으로 초기화
             })),
-            createdAt: new Date(team.createdAt),
+            createdAt: new Date(),
           }));
+
+          const restoredCourts: Court[] = (gameState.courts || []).map(
+            (court) => ({
+              id: court.id,
+              status: court.status as "idle" | "playing" | "finished",
+              team: court.team
+                ? {
+                    id: court.team.id,
+                    players: court.team.players.map((player) => ({
+                      id: player.id,
+                      name: player.name,
+                      skill: player.skill as Skill,
+                      gender: player.gender as Gender,
+                      isGuest: player.isGuest,
+                      gamesPlayedToday: 0,
+                    })),
+                    createdAt: new Date(),
+                  }
+                : undefined,
+              startedAt: court.startedAt
+                ? new Date(court.startedAt)
+                : undefined,
+              duration: court.duration,
+            })
+          );
+
+          // 내가 방금 저장한 변경이 그대로 되돌아온 것이면(에코) 무시해
+          // 저장↔구독 무한 루프를 끊는다. 다른 기기의 변경만 반영한다.
+          const incomingSig = serializeGameState(restoredTeams, restoredCourts);
+          if (incomingSig === lastSyncedSignatureRef.current) return;
+          lastSyncedSignatureRef.current = incomingSig;
+
           setTeams(restoredTeams);
-        }
+          setCourts(restoredCourts);
+        });
 
-        // showAlert('이전 게임 상태가 복원되었습니다.', 'success');
+      } catch (e) {
+        console.error("게임 페이지 초기화 실패:", e);
+      } finally {
+        setLoading(false);
       }
+    })();
 
-      // 초기 로드 완료 표시
-      setHasInitiallyLoaded(true);
-    }
-  }, [savedGameState, loading, courts, teams, hasInitiallyLoaded, showAlert]);
+    return () => {
+      if (unsubscribe) unsubscribe();
+    };
+  }, [loadPlayersWithStats, loadGameStateFromDB]);
 
-  // 실시간 타이머 업데이트
+  // 게임 상태 변경 시 자동 저장 (디바운싱)
   useEffect(() => {
-    const timer = setInterval(() => {
-      setCurrentTime(new Date());
-    }, 1000);
+    if (loading || (courts.length === 0 && teams.length === 0)) return;
 
-    return () => clearInterval(timer);
-  }, []);
+    // 실시간 구독으로 들어온 변경(에코)이면 다시 저장하지 않는다.
+    const currentSig = serializeGameState(teams, courts);
+    if (currentSig === lastSyncedSignatureRef.current) return;
+
+    const timeoutId = setTimeout(() => {
+      // 이 변경이 곧 서버로 나가므로 시그니처를 먼저 기록해,
+      // 되돌아올 실시간 에코를 무시하도록 한다.
+      lastSyncedSignatureRef.current = currentSig;
+      // Supabase에 팀 + 코트 상태 저장
+      saveCurrentGameState();
+    }, 500); // 500ms 디바운싱
+
+    return () => clearTimeout(timeoutId);
+  }, [courts, teams, loading, saveCurrentGameState]);
 
   // 설정 변경 시 코트 수 동기화
   useEffect(() => {
@@ -544,20 +442,6 @@ export default function GamePage() {
     }
   };
 
-  // 팀 생성
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const createTeam = () => {
-    if (selectedPlayers.length === 4) {
-      const newTeam: Team = {
-        id: `team-${Date.now()}`,
-        players: selectedPlayers,
-        createdAt: new Date(),
-      };
-      setTeams([...teams, newTeam]);
-      setSelectedPlayers([]);
-    }
-  };
-
   // 팀 수정 시작
   const startEditTeam = (team: Team) => {
     setEditingTeam(team);
@@ -579,48 +463,7 @@ export default function GamePage() {
       setShowPlayerModal(false);
       setEditingTeam(null);
 
-      // 백그라운드에서 오프라인 저장 및 동기화
-      updateTeamsInstant(updatedTeams);
-
-      // Supabase에 수정된 팀 상태 저장
-      try {
-        const gameTeams = updatedTeams.map((team) => ({
-          id: team.id,
-          players: team.players.map((player) => ({
-            id: player.id,
-            name: player.name,
-            skill: player.skill,
-            gender: player.gender,
-            isGuest: player.isGuest,
-          })),
-        }));
-
-        const gameCourts = courts.map((court) => ({
-          id: court.id,
-          status: court.status,
-          team: court.team
-            ? {
-                id: court.team.id,
-                players: court.team.players.map((player) => ({
-                  id: player.id,
-                  name: player.name,
-                  skill: player.skill,
-                  gender: player.gender,
-                  isGuest: player.isGuest,
-                })),
-              }
-            : undefined,
-          startedAt: court.startedAt
-            ? court.startedAt.toISOString()
-            : undefined,
-          duration: court.duration,
-        }));
-
-        await saveGameState({ teams: gameTeams, courts: gameCourts });
-        console.log("팀 수정 후 Supabase 상태 저장 완료");
-      } catch (error) {
-        console.error("팀 수정 후 Supabase 상태 저장 실패:", error);
-      }
+      // Supabase 저장은 자동저장 useEffect(디바운스)가 일괄 처리한다.
     }
   };
 
@@ -634,46 +477,7 @@ export default function GamePage() {
       setSelectedTeam(null);
     }
 
-    // 백그라운드에서 오프라인 저장 및 동기화
-    updateTeamsInstant(updatedTeams);
-
-    // Supabase에도 업데이트된 상태 저장
-    try {
-      const gameTeams = updatedTeams.map((team) => ({
-        id: team.id,
-        players: team.players.map((player) => ({
-          id: player.id,
-          name: player.name,
-          skill: player.skill,
-          gender: player.gender,
-          isGuest: player.isGuest,
-        })),
-      }));
-
-      const gameCourts = courts.map((court) => ({
-        id: court.id,
-        status: court.status,
-        team: court.team
-          ? {
-              id: court.team.id,
-              players: court.team.players.map((player) => ({
-                id: player.id,
-                name: player.name,
-                skill: player.skill,
-                gender: player.gender,
-                isGuest: player.isGuest,
-              })),
-            }
-          : undefined,
-        startedAt: court.startedAt ? court.startedAt.toISOString() : undefined,
-        duration: court.duration,
-      }));
-
-      await saveGameState({ teams: gameTeams, courts: gameCourts });
-      console.log("팀 삭제 후 Supabase 상태 업데이트 완료");
-    } catch (error) {
-      console.error("팀 삭제 후 Supabase 상태 업데이트 실패:", error);
-    }
+    // Supabase 저장은 자동저장 useEffect(디바운스)가 일괄 처리한다.
   };
 
   // 팀이 게임 가능한지 확인 (게임 중인 플레이어가 있으면 불가)
@@ -705,46 +509,7 @@ export default function GamePage() {
     setTeams(updatedTeams);
     setSelectedTeam(null);
 
-    // 백그라운드에서 오프라인 저장 및 동기화
-    updateGameStateInstant(updatedCourts, updatedTeams, availablePlayers);
-
-    // Supabase에 업데이트된 상태 저장
-    try {
-      const gameTeams = updatedTeams.map((team) => ({
-        id: team.id,
-        players: team.players.map((player) => ({
-          id: player.id,
-          name: player.name,
-          skill: player.skill,
-          gender: player.gender,
-          isGuest: player.isGuest,
-        })),
-      }));
-
-      const gameCourts = updatedCourts.map((court) => ({
-        id: court.id,
-        status: court.status,
-        team: court.team
-          ? {
-              id: court.team.id,
-              players: court.team.players.map((player) => ({
-                id: player.id,
-                name: player.name,
-                skill: player.skill,
-                gender: player.gender,
-                isGuest: player.isGuest,
-              })),
-            }
-          : undefined,
-        startedAt: court.startedAt ? court.startedAt.toISOString() : undefined,
-        duration: court.duration,
-      }));
-
-      await saveGameState({ teams: gameTeams, courts: gameCourts });
-      console.log("팀 배정 후 Supabase 상태 저장 완료");
-    } catch (error) {
-      console.error("팀 배정 후 Supabase 상태 저장 실패:", error);
-    }
+    // Supabase 저장은 자동저장 useEffect(디바운스)가 일괄 처리한다.
   };
 
   // 게임 종료
@@ -757,32 +522,31 @@ export default function GamePage() {
     try {
       const court = courts.find((c) => c.id === courtId);
       if (court && court.team) {
-        // 플레이어들의 게임 수 증가 (로컬 상태)
-        const updatedPlayers = availablePlayers.map((player) => {
-          const isInTeam = court.team!.players.some(
-            (teamPlayer) => teamPlayer.id === player.id
-          );
-          return isInTeam
-            ? { ...player, gamesPlayedToday: player.gamesPlayedToday + 1 }
-            : player;
-        });
-        setAvailablePlayers(updatedPlayers);
+        // 낙관적 업데이트: 팀원들의 오늘 게임 수 +1 (즉시 반영)
+        const teamPlayerIds = new Set(court.team.players.map((p) => p.id));
+        setAvailablePlayers((prev) =>
+          prev.map((player) =>
+            teamPlayerIds.has(player.id)
+              ? { ...player, gamesPlayedToday: player.gamesPlayedToday + 1 }
+              : player
+          )
+        );
 
-        // 데이터베이스에 게임 통계 업데이트
+        // DB에 게임 통계 배치 업데이트 (4명 순차 → upsert 1회).
+        // 낙관적 반영이 끝났으므로 전체 재조회(N+1)는 생략한다.
         try {
-          for (const player of court.team.players) {
-            await updatePlayerGameStats(
-              player.id,
-              player.name,
-              player.isGuest ? "guest" : "member"
-            );
-          }
+          await updatePlayerGameStatsBatch(
+            court.team.players.map(
+              (p): { id: string; name: string; type: "member" | "guest" } => ({
+                id: p.id,
+                name: p.name,
+                type: p.isGuest ? "guest" : "member",
+              })
+            )
+          );
         } catch (error) {
           console.error("게임 통계 업데이트 실패:", error);
         }
-
-        // 플레이어 통계 새로고침
-        await refreshPlayerStats();
       }
     } finally {
       setFinishingGames((prev) => {
@@ -806,46 +570,7 @@ export default function GamePage() {
     // 오프라인 최적화: 즉시 UI 업데이트
     setCourts(updatedCourts);
 
-    // 백그라운드에서 오프라인 저장 및 동기화
-    updateCourtsInstant(updatedCourts);
-
-    // Supabase에도 업데이트된 코트 상태 저장
-    try {
-      const gameTeams = teams.map((team) => ({
-        id: team.id,
-        players: team.players.map((player) => ({
-          id: player.id,
-          name: player.name,
-          skill: player.skill,
-          gender: player.gender,
-          isGuest: player.isGuest,
-        })),
-      }));
-
-      const gameCourts = updatedCourts.map((court) => ({
-        id: court.id,
-        status: court.status,
-        team: court.team
-          ? {
-              id: court.team.id,
-              players: court.team.players.map((player) => ({
-                id: player.id,
-                name: player.name,
-                skill: player.skill,
-                gender: player.gender,
-                isGuest: player.isGuest,
-              })),
-            }
-          : undefined,
-        startedAt: court.startedAt ? court.startedAt.toISOString() : undefined,
-        duration: court.duration,
-      }));
-
-      await saveGameState({ teams: gameTeams, courts: gameCourts });
-      console.log("게임 종료 후 Supabase 상태 저장 완료");
-    } catch (error) {
-      console.error("게임 종료 후 Supabase 상태 저장 실패:", error);
-    }
+    // Supabase 저장은 자동저장 useEffect(디바운스)가 일괄 처리한다.
   };
 
   // 게임 취소 (게임 횟수에 카운트되지 않음)
@@ -874,46 +599,7 @@ export default function GamePage() {
       // 오프라인 최적화: 즉시 UI 업데이트
       setCourts(updatedCourts);
 
-      // 백그라운드에서 오프라인 저장 및 동기화
-      updateCourtsInstant(updatedCourts);
-
-      // Supabase에도 업데이트된 코트 상태 저장 (게임 통계 업데이트 없이)
-      try {
-        const gameTeams = teams.map((team) => ({
-          id: team.id,
-          players: team.players.map((player) => ({
-            id: player.id,
-            name: player.name,
-            skill: player.skill,
-            gender: player.gender,
-            isGuest: player.isGuest,
-          })),
-        }));
-
-        const gameCourts = updatedCourts.map((court) => ({
-          id: court.id,
-          status: court.status,
-          team: court.team
-            ? {
-                id: court.team.id,
-                players: court.team.players.map((player) => ({
-                  id: player.id,
-                  name: player.name,
-                  skill: player.skill,
-                  gender: player.gender,
-                  isGuest: player.isGuest,
-                })),
-              }
-            : undefined,
-          startedAt: court.startedAt ? court.startedAt.toISOString() : undefined,
-          duration: court.duration,
-        }));
-
-        await saveGameState({ teams: gameTeams, courts: gameCourts });
-        console.log("게임 취소 후 Supabase 상태 저장 완료");
-      } catch (error) {
-        console.error("게임 취소 후 Supabase 상태 저장 실패:", error);
-      }
+      // Supabase 저장은 자동저장 useEffect(디바운스)가 일괄 처리한다.
     } catch (error) {
       console.error("게임 취소 실패:", error);
       showAlert("게임 취소에 실패했습니다.", "error");
@@ -970,49 +656,41 @@ export default function GamePage() {
     setSelectedPlayerForState(null);
   };
 
+  // 코트에서 게임 중인 플레이어 id 집합 (렌더당 1회 계산, O(1) 조회)
+  const playersInCourtsSet = useMemo(() => {
+    const s = new Set<string>();
+    courts.forEach((c) => c.team?.players.forEach((p) => s.add(p.id)));
+    return s;
+  }, [courts]);
+
+  // 대기열에 있는 플레이어 id 집합 (수정 중인 팀은 제외)
+  const playersInTeamsSet = useMemo(() => {
+    const s = new Set<string>();
+    teams.forEach((t) => {
+      if (editingTeam && t.id === editingTeam.id) return;
+      t.players.forEach((p) => s.add(p.id));
+    });
+    return s;
+  }, [teams, editingTeam]);
+
   // 플레이어 상태 확인 (확장된 상태 포함)
-  const getPlayerStatus = (
-    playerId: string
-  ): "available" | "waiting" | "playing" | "home" | "lesson" => {
-    // 먼저 특별 상태 확인
-    const specialState = playerStates[playerId];
-    if (specialState) return specialState;
+  const getPlayerStatus = useCallback(
+    (
+      playerId: string
+    ): "available" | "waiting" | "playing" | "home" | "lesson" => {
+      // 먼저 특별 상태 확인
+      const specialState = playerStates[playerId];
+      if (specialState) return specialState;
 
-    // 수정 모드일 때는 현재 수정 중인 팀의 플레이어들을 제외하고 확인
-    const teamsToCheck = editingTeam
-      ? teams.filter((team) => team.id !== editingTeam.id)
-      : teams;
-
-    const playersInTeams = teamsToCheck.flatMap((team) =>
-      team.players.map((p) => p.id)
-    );
-    const playersInCourts = courts
-      .filter((c) => c.team)
-      .flatMap((c) => c.team!.players.map((p) => p.id));
-
-    if (playersInCourts.includes(playerId)) return "playing";
-    if (playersInTeams.includes(playerId)) return "waiting";
-    return "available";
-  };
-
-  // 사용 가능한 플레이어 필터링 (대기열과 게임 중이 아닌 플레이어)
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const getAvailablePlayersForSelection = () => {
-    return availablePlayers.filter(
-      (player) => getPlayerStatus(player.id) === "available"
-    );
-  };
-
-  // 게임 진행 시간 계산 (분:초 형태)
-  const getGameDuration = (startedAt: Date): string => {
-    const diffMs = currentTime.getTime() - startedAt.getTime();
-    const diffMinutes = Math.floor(diffMs / (1000 * 60));
-    const diffSeconds = Math.floor((diffMs % (1000 * 60)) / 1000);
-    return `${diffMinutes}:${diffSeconds.toString().padStart(2, "0")}`;
-  };
+      if (playersInCourtsSet.has(playerId)) return "playing";
+      if (playersInTeamsSet.has(playerId)) return "waiting";
+      return "available";
+    },
+    [playerStates, playersInCourtsSet, playersInTeamsSet]
+  );
 
   // 플레이어 정렬 (남자-이름순, 여자-이름순) - 모든 플레이어 표시
-  const getSortedPlayers = () => {
+  const sortedPlayers = useMemo(() => {
     // 모든 출석한 플레이어를 표시 (상태와 관계없이)
     const males = availablePlayers
       .filter((p) => p.gender === "M")
@@ -1022,22 +700,7 @@ export default function GamePage() {
       .sort((a, b) => a.name.localeCompare(b.name));
 
     return [...males, ...females];
-  };
-
-  // 실력 점수 계산 (S=5, A=4, B=3, C=2, D=1, E=1, F=1)
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const getSkillScore = (skill: Skill): number => {
-    const scores: Record<Skill, number> = {
-      S: 5,
-      A: 4,
-      B: 3,
-      C: 2,
-      D: 1,
-      E: 1,
-      F: 1,
-    };
-    return scores[skill] || 1;
-  };
+  }, [availablePlayers]);
 
   // 실력 기반 랜덤 선택 (골고루 분포)
   const selectPlayersBySkill = (players: Player[], count: number): Player[] => {
@@ -1122,48 +785,7 @@ export default function GamePage() {
       setSelectedPlayers([]);
       setShowPlayerModal(false);
 
-      // 백그라운드에서 오프라인 저장 및 동기화
-      updateTeamsInstant(updatedTeams);
-
-      // Supabase에 새 팀 상태 저장
-      try {
-        const gameTeams = updatedTeams.map((team) => ({
-          id: team.id,
-          players: team.players.map((player) => ({
-            id: player.id,
-            name: player.name,
-            skill: player.skill,
-            gender: player.gender,
-            isGuest: player.isGuest,
-          })),
-        }));
-
-        const gameCourts = courts.map((court) => ({
-          id: court.id,
-          status: court.status,
-          team: court.team
-            ? {
-                id: court.team.id,
-                players: court.team.players.map((player) => ({
-                  id: player.id,
-                  name: player.name,
-                  skill: player.skill,
-                  gender: player.gender,
-                  isGuest: player.isGuest,
-                })),
-              }
-            : undefined,
-          startedAt: court.startedAt
-            ? court.startedAt.toISOString()
-            : undefined,
-          duration: court.duration,
-        }));
-
-        await saveGameState({ teams: gameTeams, courts: gameCourts });
-        console.log("팀 생성 후 Supabase 상태 저장 완료");
-      } catch (error) {
-        console.error("팀 생성 후 Supabase 상태 저장 실패:", error);
-      }
+      // Supabase 저장은 자동저장 useEffect(디바운스)가 일괄 처리한다.
     }
   };
 
@@ -1200,8 +822,7 @@ export default function GamePage() {
           {/* 온라인 상태 표시기 */}
           <OnlineStatusIndicator
             isOnline={isOnline}
-            pendingSyncCount={pendingSyncCount}
-            onForceSync={forceSync}
+            pendingSyncCount={0}
             className="ml-4"
           />
         </div>
@@ -1302,79 +923,14 @@ export default function GamePage() {
                 <button
                   onClick={async () => {
                     try {
-                      // DB에서 최신 데이터 동기화 (페이지 새로고침 없이)
-                      await loadGameStateFromDB();
-
-                      // 출석 데이터와 회원 정보도 다시 로드
-                      const [appSettings, members, attendance] =
-                        await Promise.all([
-                          getAppSettings(),
-                          listMembers(),
-                          getTodayAttendance(),
-                        ]);
-
+                      // DB에서 최신 설정 + 플레이어 통계 + 게임 상태를 동기화 (배치)
+                      const [appSettings, players] = await Promise.all([
+                        getAppSettings(),
+                        loadPlayersWithStats(),
+                      ]);
                       setSettings(appSettings);
-
-                      // 오늘 출석한 회원들과 게스트들을 플레이어로 변환
-                      const players: Player[] = [];
-
-                      // 회원 처리
-                      const memberParticipants = attendance.participants.filter(
-                        (p) => p.type === "member"
-                      );
-                      for (const participant of memberParticipants) {
-                        if (participant.type === "member") {
-                          const member = members.find(
-                            (m) => m.id === participant.memberId
-                          );
-                          if (member) {
-                            const stats = await getTodayPlayerStats(
-                              member.id,
-                              member.name,
-                              "member"
-                            );
-                            players.push({
-                              id: member.id,
-                              name: member.name,
-                              skill: member.skill,
-                              gender: member.gender,
-                              gamesPlayedToday: stats.gamesPlayedToday,
-                              isGuest: false,
-                            });
-                          }
-                        }
-                      }
-
-                      // 게스트 처리
-                      const guestParticipants = attendance.participants.filter(
-                        (p) => p.type === "guest"
-                      );
-                      for (const [
-                        index,
-                        participant,
-                      ] of guestParticipants.entries()) {
-                        if (participant.type === "guest") {
-                          const guestId = `guest-${index}`;
-                          // 오늘의 게임 통계 가져오기
-                          const stats = await getTodayPlayerStats(
-                            guestId,
-                            participant.name,
-                            "guest"
-                          );
-                          players.push({
-                            id: guestId,
-                            name: participant.name,
-                            skill: participant.skill,
-                            gender: participant.gender,
-                            gamesPlayedToday: stats.gamesPlayedToday,
-                            isGuest: true,
-                          });
-                        }
-                      }
-
-                      setAvailablePlayers(
-                        players.sort((a, b) => a.name.localeCompare(b.name))
-                      );
+                      setAvailablePlayers(players);
+                      await loadGameStateFromDB();
                     } catch (error) {
                       console.error("동기화 실패:", error);
                       showAlert(
@@ -1443,7 +999,7 @@ export default function GamePage() {
                           <div className="flex items-center gap-2">
                             <div className="w-2 h-2 bg-green-900 rounded-full animate-bounce"></div>
                             <span className="text-lg font-bold font-mono tracking-wider">
-                              {getGameDuration(court.startedAt)}
+                              <CourtTimer startedAt={court.startedAt} />
                             </span>
                           </div>
                         </div>
@@ -1757,7 +1313,7 @@ export default function GamePage() {
                         <h3 className="text-sm font-bold text-blue-700">남</h3>
                       </div>
                       <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-3 gap-1.5 sm:gap-2 lg:gap-3">
-                        {getSortedPlayers()
+                        {sortedPlayers
                           .filter((player) => player.gender === "M")
                           .map((player) => {
                             const status = getPlayerStatus(player.id);
@@ -1779,20 +1335,18 @@ export default function GamePage() {
                                   e.preventDefault();
                                   handlePlayerLongPress(player);
                                 }}
-                                onTouchStart={(e) => {
-                                  const touchTimer = setTimeout(() => {
+                                onTouchStart={() => {
+                                  longPressTimerRef.current = setTimeout(() => {
                                     handlePlayerLongPress(player);
                                   }, 500);
-                                  e.currentTarget.addEventListener(
-                                    "touchend",
-                                    () => clearTimeout(touchTimer),
-                                    { once: true }
-                                  );
-                                  e.currentTarget.addEventListener(
-                                    "touchmove",
-                                    () => clearTimeout(touchTimer),
-                                    { once: true }
-                                  );
+                                }}
+                                onTouchEnd={() => {
+                                  if (longPressTimerRef.current)
+                                    clearTimeout(longPressTimerRef.current);
+                                }}
+                                onTouchMove={() => {
+                                  if (longPressTimerRef.current)
+                                    clearTimeout(longPressTimerRef.current);
                                 }}
                                 className={`p-1.5 sm:p-2 lg:p-3 rounded-lg sm:rounded-xl border-2 transition-all duration-200 min-h-[60px] sm:min-h-[70px] lg:min-h-[90px] ${
                                   !isSelectable
@@ -1889,7 +1443,7 @@ export default function GamePage() {
                         <h3 className="text-sm font-bold text-pink-700">여</h3>
                       </div>
                       <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-3 gap-1.5 sm:gap-2 lg:gap-3">
-                        {getSortedPlayers()
+                        {sortedPlayers
                           .filter((player) => player.gender === "F")
                           .map((player) => {
                             const status = getPlayerStatus(player.id);
@@ -1911,20 +1465,18 @@ export default function GamePage() {
                                   e.preventDefault();
                                   handlePlayerLongPress(player);
                                 }}
-                                onTouchStart={(e) => {
-                                  const touchTimer = setTimeout(() => {
+                                onTouchStart={() => {
+                                  longPressTimerRef.current = setTimeout(() => {
                                     handlePlayerLongPress(player);
                                   }, 500);
-                                  e.currentTarget.addEventListener(
-                                    "touchend",
-                                    () => clearTimeout(touchTimer),
-                                    { once: true }
-                                  );
-                                  e.currentTarget.addEventListener(
-                                    "touchmove",
-                                    () => clearTimeout(touchTimer),
-                                    { once: true }
-                                  );
+                                }}
+                                onTouchEnd={() => {
+                                  if (longPressTimerRef.current)
+                                    clearTimeout(longPressTimerRef.current);
+                                }}
+                                onTouchMove={() => {
+                                  if (longPressTimerRef.current)
+                                    clearTimeout(longPressTimerRef.current);
                                 }}
                                 className={`p-2 sm:p-3 rounded-xl border-2 transition-all duration-200 min-h-[70px] sm:min-h-[90px] ${
                                   !isSelectable
@@ -2039,17 +1591,6 @@ export default function GamePage() {
         )}
       </div>
 
-      {/* 동기화 상태 표시기 */}
-      <SyncStatusIndicator
-        syncStatus={syncStatus}
-        onSync={() => {
-          executeOnce("manual-sync", async () => {
-            await syncWithServer();
-            showAlert("동기화가 완료되었습니다.", "success");
-          });
-        }}
-      />
-
       {/* 플레이어 상태 선택 모달 */}
       {showPlayerStateModal && selectedPlayerForState && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -2144,25 +1685,6 @@ export default function GamePage() {
             </div>
           </div>
         </div>
-      )}
-
-      {/* 충돌 해결 모달 */}
-      {syncStatus.conflicts.length > 0 && (
-        <ConflictResolver
-          conflicts={syncStatus.conflicts}
-          onResolve={(conflictId, resolution) => {
-            resolveConflict(conflictId, resolution);
-            showAlert(
-              `충돌이 ${
-                resolution === "local" ? "로컬" : "서버"
-              } 데이터로 해결되었습니다.`,
-              "success"
-            );
-          }}
-          onClose={() => {
-            /* 충돌 해결 모달 닫기 */
-          }}
-        />
       )}
 
       {/* 게임 취소 확인 모달 */}
