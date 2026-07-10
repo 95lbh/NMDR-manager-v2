@@ -1,6 +1,8 @@
 // 공용 상수
 
-export const SKILLS = ["S", "A", "B", "C", "D", "E", "F"] as const;
+import type { Skill } from "@/types/db";
+
+export const SKILLS: Skill[] = ["S", "A", "B", "C", "D", "E", "F"];
 
 // 출생연도 선택 옵션 — 현재 연도 기준으로 동적 생성한다.
 // (기존에는 2005년 상한이 하드코딩되어 그 이후 출생자를 등록할 수 없었다.)

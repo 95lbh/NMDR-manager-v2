@@ -16,9 +16,8 @@ import type { AppSettings } from "@/types/settings";
 import type { Member, Skill, Gender } from "@/types/db";
 import { useAlert } from "@/components/CustomAlert";
 import ConfirmModal from "@/components/ConfirmModal";
-import { BIRTH_YEARS } from "@/lib/constants";
-
-const SKILLS: Skill[] = ["S", "A", "B", "C", "D", "E", "F"];
+import { SKILLS } from "@/lib/constants";
+import BirthYearSelect from "@/components/BirthYearSelect";
 
 type TabType = "court" | "members" | "data" | "system";
 
@@ -742,12 +741,11 @@ function EditMemberModal({ member, onClose, onSave }: {
 
           <div>
             <label className="block text-sm font-medium mb-2" style={{color: 'var(--notion-text)'}}>출생년도</label>
-            <select value={birthYear} onChange={e => setBirthYear(Number(e.target.value))} className="notion-input w-full">
-              <option value="">출생년도 선택</option>
-              {BIRTH_YEARS.map(year => (
-                <option key={year} value={year}>{year}년</option>
-              ))}
-            </select>
+            <BirthYearSelect
+              value={birthYear}
+              onChange={(y) => setBirthYear(typeof y === "number" ? y : birthYear)}
+              className="notion-input w-full"
+            />
           </div>
 
           <div>

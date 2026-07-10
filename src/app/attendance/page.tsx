@@ -6,8 +6,8 @@ import type { Gender, Skill, Member, AttendanceParticipant } from '@/types/db';
 import { useAlert } from '@/components/CustomAlert';
 import { usePreventDuplicate } from '@/hooks/usePreventDuplicate';
 import ConfirmModal from '@/components/ConfirmModal';
-import { BIRTH_YEARS } from '@/lib/constants';
-const SKILLS: Skill[] = ['S','A','B','C','D','E','F'];
+import { SKILLS } from '@/lib/constants';
+import BirthYearSelect from '@/components/BirthYearSelect';
 
 // 초성 계산 유틸
 const CHOSEONG_LIST = [
@@ -536,12 +536,7 @@ export default function AttendancePage() {
       <Modal onClose={()=>setShowMemberModal(false)} title="회원 추가">
         <div className="flex flex-col gap-3">
           <input value={name} onChange={e=>setName(e.target.value)} placeholder="이름" className="notion-input" />
-          <select value={birthYear} onChange={e=>setBirthYear(e.target.value ? Number(e.target.value) : '')} className="notion-input">
-              <option value="">출생년도 선택</option>
-              {BIRTH_YEARS.map(year => (
-                <option key={year} value={year}>{year}년</option>
-              ))}
-            </select>
+          <BirthYearSelect value={birthYear} onChange={setBirthYear} />
           <div className="flex gap-2">
             <select value={gender} onChange={e=>setGender(e.target.value as Gender)} className="notion-input">
               <option value="M">남성</option>
@@ -566,12 +561,7 @@ export default function AttendancePage() {
       <Modal onClose={()=>setShowGuestModal(false)} title="게스트 추가">
         <div className="flex flex-col gap-3">
           <input value={gName} onChange={e=>setGName(e.target.value)} placeholder="이름" className="notion-input" />
-          <select value={gBirthYear} onChange={e=>setGBirthYear(e.target.value ? Number(e.target.value) : '')} className="notion-input">
-              <option value="">출생년도 선택</option>
-              {BIRTH_YEARS.map(year => (
-                <option key={year} value={year}>{year}년</option>
-              ))}
-            </select>
+          <BirthYearSelect value={gBirthYear} onChange={setGBirthYear} />
           <div className="flex gap-2">
             <select value={gGender} onChange={e=>setGGender(e.target.value as Gender)} className="notion-input">
               <option value="M">남성</option>
