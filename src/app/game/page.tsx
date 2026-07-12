@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, useRef, useMemo } from "react";
+import { useEffect, useState, useCallback, useRef, useMemo, memo } from "react";
 import {
   getAppSettings,
   listMembers,
@@ -52,6 +52,154 @@ function CourtTimer({ startedAt }: { startedAt: Date }) {
   return <>{`${diffMinutes}:${diffSeconds.toString().padStart(2, "0")}`}</>;
 }
 
+// 성별에 따라 광범위하게 다른 반응형 스타일을 명시적으로 분리 (디자인 그대로 보존).
+const CARD_STYLE = {
+  M: {
+    outer:
+      "p-1.5 sm:p-2 lg:p-3 rounded-lg sm:rounded-xl border-2 transition-all duration-200 min-h-[60px] sm:min-h-[70px] lg:min-h-[90px]",
+    selected:
+      "bg-blue-50 border-blue-600 cursor-pointer shadow-md transform scale-105",
+    statusRow: "flex justify-center h-4 sm:h-5 mb-1",
+    statusBadge:
+      "w-full text-center text-xs px-1.5 py-0.5 sm:px-2 sm:py-1 rounded-full font-medium",
+    infoRow: "flex items-center justify-between mb-1 h-4 sm:h-5",
+    dot: "w-3 h-3 sm:w-4 sm:h-4 rounded-full bg-blue-500",
+    name: "font-bold text-xs sm:text-sm lg:text-lg truncate flex-1 text-center px-1",
+    skill:
+      "px-1 py-0.5 sm:px-1.5 sm:py-0.5 lg:px-2 lg:py-1 rounded text-xs font-medium",
+  },
+  F: {
+    outer:
+      "p-2 sm:p-3 rounded-xl border-2 transition-all duration-200 min-h-[70px] sm:min-h-[90px]",
+    selected:
+      "bg-pink-50 border-pink-600 cursor-pointer shadow-md transform scale-105",
+    statusRow: "flex justify-center h-5 mb-1",
+    statusBadge: "w-full text-center text-xs px-2 py-1 rounded-full font-medium",
+    infoRow: "flex items-center justify-between mb-1 h-5",
+    dot: "w-4 h-4 rounded-full bg-pink-500",
+    name: "font-bold text-sm sm:text-lg truncate flex-1 text-center",
+    skill: "px-1.5 py-0.5 sm:px-2 sm:py-1 rounded text-xs font-medium",
+  },
+} as const;
+
+function skillBadgeColor(skill: Skill): string {
+  return skill === "S"
+    ? "bg-red-100 text-red-700"
+    : skill === "A"
+    ? "bg-orange-100 text-orange-700"
+    : skill === "B"
+    ? "bg-yellow-100 text-yellow-700"
+    : skill === "C"
+    ? "bg-green-100 text-green-700"
+    : "bg-blue-100 text-blue-700";
+}
+
+// 플레이어 선택 카드. memo로 감싸 selectedPlayers 변경 시 isSelected가
+// 바뀐 카드만 리렌더되도록 격리한다 (핸들러는 useCallback으로 안정화).
+const PlayerCard = memo(function PlayerCard({
+  player,
+  status,
+  isSelectable,
+  isSelected,
+  onSelect,
+  onLongPress,
+  longPressTimerRef,
+}: {
+  player: Player;
+  status: "available" | "waiting" | "playing" | "home" | "lesson";
+  isSelectable: boolean;
+  isSelected: boolean;
+  onSelect: (player: Player) => void;
+  onLongPress: (player: Player) => void;
+  longPressTimerRef: { current: ReturnType<typeof setTimeout> | null };
+}) {
+  const s = CARD_STYLE[player.gender];
+  const showBadge =
+    status === "playing" ||
+    status === "waiting" ||
+    status === "home" ||
+    status === "lesson";
+
+  return (
+    <div
+      onClick={() => isSelectable && onSelect(player)}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        onLongPress(player);
+      }}
+      onTouchStart={() => {
+        longPressTimerRef.current = setTimeout(() => onLongPress(player), 500);
+      }}
+      onTouchEnd={() => {
+        if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
+      }}
+      onTouchMove={() => {
+        if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
+      }}
+      className={`${s.outer} ${
+        !isSelectable
+          ? "opacity-50 cursor-not-allowed bg-gray-50 border-gray-200"
+          : isSelected
+          ? s.selected
+          : status === "playing"
+          ? "bg-green-50 border-green-300 cursor-pointer hover:border-green-400 hover:shadow-md"
+          : status === "home"
+          ? "bg-gray-50 border-gray-300 cursor-pointer hover:border-gray-400 hover:shadow-md"
+          : status === "lesson"
+          ? "bg-orange-50 border-orange-300 cursor-pointer hover:border-orange-400 hover:shadow-md"
+          : "bg-white border-gray-400 hover:border-gray-300 cursor-pointer hover:shadow-md"
+      }`}
+    >
+      {/* 1행: 중앙 상단 게임 상태 */}
+      <div className={s.statusRow}>
+        {showBadge && (
+          <span
+            className={`${s.statusBadge} ${
+              status === "playing"
+                ? "bg-green-100 text-green-700"
+                : status === "home"
+                ? "bg-gray-100 text-gray-700"
+                : status === "lesson"
+                ? "bg-orange-100 text-orange-700"
+                : "bg-yellow-100 text-yellow-700"
+            }`}
+          >
+            {status === "playing"
+              ? "게임중"
+              : status === "home"
+              ? "집에 감"
+              : status === "lesson"
+              ? "레슨 중"
+              : "대기중"}
+          </span>
+        )}
+      </div>
+
+      {/* 2행: 성별 점 + 이름 + 등급 */}
+      <div className={s.infoRow}>
+        <div className={s.dot}></div>
+        <span
+          className={s.name}
+          style={{ color: "var(--notion-text)" }}
+          title={`${player.isGuest ? "(G) " : ""}${player.name}`}
+        >
+          {player.isGuest ? "(G) " : ""}
+          {player.name}
+        </span>
+        <span className={`${s.skill} ${skillBadgeColor(player.skill)}`}>
+          {player.skill}
+        </span>
+      </div>
+
+      {/* 3행: 중앙 게임 수 */}
+      <div className="flex justify-center">
+        <span className="text-xs text-center text-gray-600 font-bold">
+          오늘 {player.gamesPlayedToday} 게임 함
+        </span>
+      </div>
+    </div>
+  );
+});
 
 export default function GamePage() {
   const { showAlert } = useAlert();
@@ -337,13 +485,17 @@ export default function GamePage() {
   }, [settings, courts]);
 
   // 플레이어 선택/해제
-  const togglePlayerSelection = (player: Player) => {
-    if (selectedPlayers.find((p) => p.id === player.id)) {
-      setSelectedPlayers(selectedPlayers.filter((p) => p.id !== player.id));
-    } else if (selectedPlayers.length < 4) {
-      setSelectedPlayers([...selectedPlayers, player]);
-    }
-  };
+  const togglePlayerSelection = useCallback((player: Player) => {
+    setSelectedPlayers((prev) => {
+      if (prev.find((p) => p.id === player.id)) {
+        return prev.filter((p) => p.id !== player.id);
+      }
+      if (prev.length < 4) {
+        return [...prev, player];
+      }
+      return prev;
+    });
+  }, []);
 
   // 팀 수정 시작
   const startEditTeam = (team: Team) => {
@@ -535,10 +687,10 @@ export default function GamePage() {
   };
 
   // 플레이어 상태 관리 함수들
-  const handlePlayerLongPress = (player: Player) => {
+  const handlePlayerLongPress = useCallback((player: Player) => {
     setSelectedPlayerForState(player);
     setShowPlayerStateModal(true);
-  };
+  }, []);
 
   const setPlayerState = (
     playerId: string,
@@ -1224,112 +1376,21 @@ export default function GamePage() {
                             const isSelectable = editingTeam
                               ? !["playing", "home", "lesson"].includes(status)
                               : !["waiting", "home", "lesson"].includes(status);
-                            const isSelected = selectedPlayers.find(
-                              (p) => p.id === player.id
-                            );
-
                             return (
-                              <div
+                              <PlayerCard
                                 key={player.id}
-                                onClick={() =>
-                                  isSelectable && togglePlayerSelection(player)
+                                player={player}
+                                status={status}
+                                isSelectable={isSelectable}
+                                isSelected={
+                                  !!selectedPlayers.find(
+                                    (p) => p.id === player.id
+                                  )
                                 }
-                                onContextMenu={(e) => {
-                                  e.preventDefault();
-                                  handlePlayerLongPress(player);
-                                }}
-                                onTouchStart={() => {
-                                  longPressTimerRef.current = setTimeout(() => {
-                                    handlePlayerLongPress(player);
-                                  }, 500);
-                                }}
-                                onTouchEnd={() => {
-                                  if (longPressTimerRef.current)
-                                    clearTimeout(longPressTimerRef.current);
-                                }}
-                                onTouchMove={() => {
-                                  if (longPressTimerRef.current)
-                                    clearTimeout(longPressTimerRef.current);
-                                }}
-                                className={`p-1.5 sm:p-2 lg:p-3 rounded-lg sm:rounded-xl border-2 transition-all duration-200 min-h-[60px] sm:min-h-[70px] lg:min-h-[90px] ${
-                                  !isSelectable
-                                    ? "opacity-50 cursor-not-allowed bg-gray-50 border-gray-200"
-                                    : isSelected
-                                    ? "bg-blue-50 border-blue-600 cursor-pointer shadow-md transform scale-105"
-                                    : status === "playing"
-                                    ? "bg-green-50 border-green-300 cursor-pointer hover:border-green-400 hover:shadow-md"
-                                    : status === "home"
-                                    ? "bg-gray-50 border-gray-300 cursor-pointer hover:border-gray-400 hover:shadow-md"
-                                    : status === "lesson"
-                                    ? "bg-orange-50 border-orange-300 cursor-pointer hover:border-orange-400 hover:shadow-md"
-                                    : "bg-white border-gray-400 hover:border-gray-300 cursor-pointer hover:shadow-md"
-                                }`}
-                              >
-                                {/* 1행: 중앙 상단 게임 상태 */}
-                                <div className="flex justify-center h-4 sm:h-5 mb-1">
-                                  {(status === "playing" ||
-                                    status === "waiting" ||
-                                    status === "home" ||
-                                    status === "lesson") && (
-                                    <span
-                                      className={`w-full text-center text-xs px-1.5 py-0.5 sm:px-2 sm:py-1 rounded-full font-medium ${
-                                        status === "playing"
-                                          ? "bg-green-100 text-green-700"
-                                          : status === "home"
-                                          ? "bg-gray-100 text-gray-700"
-                                          : status === "lesson"
-                                          ? "bg-orange-100 text-orange-700"
-                                          : "bg-yellow-100 text-yellow-700"
-                                      }`}
-                                    >
-                                      {status === "playing"
-                                        ? "게임중"
-                                        : status === "home"
-                                        ? "집에 감"
-                                        : status === "lesson"
-                                        ? "레슨 중"
-                                        : "대기중"}
-                                    </span>
-                                  )}
-                                </div>
-
-                                {/* 2행: 성별 점 + 이름 + 등급 */}
-                                <div className="flex items-center justify-between mb-1 h-4 sm:h-5">
-                                  <div className="w-3 h-3 sm:w-4 sm:h-4 rounded-full bg-blue-500"></div>
-                                  <span
-                                    className="font-bold text-xs sm:text-sm lg:text-lg truncate flex-1 text-center px-1"
-                                    style={{ color: "var(--notion-text)" }}
-                                    title={`${player.isGuest ? "(G) " : ""}${
-                                      player.name
-                                    }`}
-                                  >
-                                    {player.isGuest ? "(G) " : ""}
-                                    {player.name}
-                                  </span>
-                                  <span
-                                    className={`px-1 py-0.5 sm:px-1.5 sm:py-0.5 lg:px-2 lg:py-1 rounded text-xs font-medium ${
-                                      player.skill === "S"
-                                        ? "bg-red-100 text-red-700"
-                                        : player.skill === "A"
-                                        ? "bg-orange-100 text-orange-700"
-                                        : player.skill === "B"
-                                        ? "bg-yellow-100 text-yellow-700"
-                                        : player.skill === "C"
-                                        ? "bg-green-100 text-green-700"
-                                        : "bg-blue-100 text-blue-700"
-                                    }`}
-                                  >
-                                    {player.skill}
-                                  </span>
-                                </div>
-
-                                {/* 3행: 중앙 게임 수 */}
-                                <div className="flex justify-center">
-                                  <span className="text-xs text-center text-gray-600 font-bold">
-                                    오늘 {player.gamesPlayedToday} 게임 함
-                                  </span>
-                                </div>
-                              </div>
+                                onSelect={togglePlayerSelection}
+                                onLongPress={handlePlayerLongPress}
+                                longPressTimerRef={longPressTimerRef}
+                              />
                             );
                           })}
                       </div>
@@ -1354,112 +1415,21 @@ export default function GamePage() {
                             const isSelectable = editingTeam
                               ? !["playing", "home", "lesson"].includes(status)
                               : !["waiting", "home", "lesson"].includes(status);
-                            const isSelected = selectedPlayers.find(
-                              (p) => p.id === player.id
-                            );
-
                             return (
-                              <div
+                              <PlayerCard
                                 key={player.id}
-                                onClick={() =>
-                                  isSelectable && togglePlayerSelection(player)
+                                player={player}
+                                status={status}
+                                isSelectable={isSelectable}
+                                isSelected={
+                                  !!selectedPlayers.find(
+                                    (p) => p.id === player.id
+                                  )
                                 }
-                                onContextMenu={(e) => {
-                                  e.preventDefault();
-                                  handlePlayerLongPress(player);
-                                }}
-                                onTouchStart={() => {
-                                  longPressTimerRef.current = setTimeout(() => {
-                                    handlePlayerLongPress(player);
-                                  }, 500);
-                                }}
-                                onTouchEnd={() => {
-                                  if (longPressTimerRef.current)
-                                    clearTimeout(longPressTimerRef.current);
-                                }}
-                                onTouchMove={() => {
-                                  if (longPressTimerRef.current)
-                                    clearTimeout(longPressTimerRef.current);
-                                }}
-                                className={`p-2 sm:p-3 rounded-xl border-2 transition-all duration-200 min-h-[70px] sm:min-h-[90px] ${
-                                  !isSelectable
-                                    ? "opacity-50 cursor-not-allowed bg-gray-50 border-gray-200"
-                                    : isSelected
-                                    ? "bg-pink-50 border-pink-600 cursor-pointer shadow-md transform scale-105"
-                                    : status === "playing"
-                                    ? "bg-green-50 border-green-300 cursor-pointer hover:border-green-400 hover:shadow-md"
-                                    : status === "home"
-                                    ? "bg-gray-50 border-gray-300 cursor-pointer hover:border-gray-400 hover:shadow-md"
-                                    : status === "lesson"
-                                    ? "bg-orange-50 border-orange-300 cursor-pointer hover:border-orange-400 hover:shadow-md"
-                                    : "bg-white border-gray-400 hover:border-gray-300 cursor-pointer hover:shadow-md"
-                                }`}
-                              >
-                                {/* 1행: 중앙 상단 게임 상태 */}
-                                <div className="flex justify-center h-5 mb-1">
-                                  {(status === "playing" ||
-                                    status === "waiting" ||
-                                    status === "home" ||
-                                    status === "lesson") && (
-                                    <span
-                                      className={`w-full text-center text-xs px-2 py-1 rounded-full font-medium ${
-                                        status === "playing"
-                                          ? "bg-green-100 text-green-700"
-                                          : status === "home"
-                                          ? "bg-gray-100 text-gray-700"
-                                          : status === "lesson"
-                                          ? "bg-orange-100 text-orange-700"
-                                          : "bg-yellow-100 text-yellow-700"
-                                      }`}
-                                    >
-                                      {status === "playing"
-                                        ? "게임중"
-                                        : status === "home"
-                                        ? "집에 감"
-                                        : status === "lesson"
-                                        ? "레슨 중"
-                                        : "대기중"}
-                                    </span>
-                                  )}
-                                </div>
-
-                                {/* 2행: 성별 점 + 이름 + 등급 */}
-                                <div className="flex items-center justify-between mb-1 h-5">
-                                  <div className="w-4 h-4 rounded-full bg-pink-500"></div>
-                                  <span
-                                    className="font-bold text-sm sm:text-lg truncate flex-1 text-center"
-                                    style={{ color: "var(--notion-text)" }}
-                                    title={`${player.isGuest ? "(G) " : ""}${
-                                      player.name
-                                    }`}
-                                  >
-                                    {player.isGuest ? "(G) " : ""}
-                                    {player.name}
-                                  </span>
-                                  <span
-                                    className={`px-1.5 py-0.5 sm:px-2 sm:py-1 rounded text-xs font-medium ${
-                                      player.skill === "S"
-                                        ? "bg-red-100 text-red-700"
-                                        : player.skill === "A"
-                                        ? "bg-orange-100 text-orange-700"
-                                        : player.skill === "B"
-                                        ? "bg-yellow-100 text-yellow-700"
-                                        : player.skill === "C"
-                                        ? "bg-green-100 text-green-700"
-                                        : "bg-blue-100 text-blue-700"
-                                    }`}
-                                  >
-                                    {player.skill}
-                                  </span>
-                                </div>
-
-                                {/* 3행: 중앙 게임 수 */}
-                                <div className="flex justify-center ">
-                                  <span className="text-xs text-center text-gray-600 font-bold">
-                                    오늘 {player.gamesPlayedToday} 게임 함
-                                  </span>
-                                </div>
-                              </div>
+                                onSelect={togglePlayerSelection}
+                                onLongPress={handlePlayerLongPress}
+                                longPressTimerRef={longPressTimerRef}
+                              />
                             );
                           })}
                       </div>
