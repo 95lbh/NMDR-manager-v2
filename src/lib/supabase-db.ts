@@ -65,6 +65,8 @@ export async function createMember(input: {
     throw new Error(`회원 생성 실패: ${error.message}`);
   }
 
+  invalidateMembersCache();
+
   // 반환 데이터를 기존 인터페이스 형식으로 변환
   return {
     id: data.id,
@@ -78,7 +80,19 @@ export async function createMember(input: {
   };
 }
 
-export async function listMembers(): Promise<Member[]> {
+// 회원 목록 모듈 캐시. 단일 기기 운영이라 회원 변경은 이 앱의 CRUD로만 발생하므로,
+// 변경 함수에서 invalidateMembersCache()로 무효화한다. (페이지 전환 시 재조회 절감)
+let membersCache: Member[] | null = null;
+
+export function invalidateMembersCache() {
+  membersCache = null;
+}
+
+export async function listMembers(options?: { force?: boolean }): Promise<Member[]> {
+  if (membersCache && !options?.force) {
+    return membersCache;
+  }
+
   const { data, error } = await supabase
     .from('members')
     .select('*')
@@ -90,7 +104,7 @@ export async function listMembers(): Promise<Member[]> {
   }
 
   // 데이터를 기존 인터페이스 형식으로 변환
-  return data.map(member => ({
+  membersCache = data.map(member => ({
     id: member.id,
     name: member.name,
     nameLower: member.name_lower,
@@ -100,6 +114,7 @@ export async function listMembers(): Promise<Member[]> {
     createdAt: member.created_at,
     deleted: member.deleted
   }));
+  return membersCache;
 }
 
 export async function deleteMember(memberId: string): Promise<void> {
@@ -111,6 +126,8 @@ export async function deleteMember(memberId: string): Promise<void> {
   if (error) {
     throw new Error(`회원 삭제 실패: ${error.message}`);
   }
+
+  invalidateMembersCache();
 }
 
 export async function updateMemberSkill(memberId: string, skill: Skill): Promise<void> {
@@ -163,6 +180,8 @@ export async function updateMember(memberId: string, updates: {
   if (error) {
     throw new Error(`회원 정보 업데이트 실패: ${error.message}`);
   }
+
+  invalidateMembersCache();
 
   // 반환 데이터를 기존 인터페이스 형식으로 변환
   return {
@@ -614,6 +633,8 @@ export async function resetMembersData(): Promise<void> {
   if (error) {
     throw new Error(`회원 데이터 초기화 실패: ${error.message}`);
   }
+
+  invalidateMembersCache();
 }
 
 // ===== 게임 상태 관리 함수들 =====
